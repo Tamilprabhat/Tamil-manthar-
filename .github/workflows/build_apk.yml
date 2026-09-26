@@ -31,20 +31,17 @@ jobs:
             flutter create --project-name tamil_manthar --platforms=android --org com.tamilmanthar.app .
           fi
           echo "android.enableNewDsl=false" >> android/gradle.properties
+          echo "android.useAndroidX=true" >> android/gradle.properties
+          echo "android.enableJetifier=true" >> android/gradle.properties
 
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build APK Direct
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleRelease
+      - name: Build Flutter APK
+        run: flutter build apk --release --no-tree-shake-icons
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tamil-manthar-apk
-          path: |
-            android/app/build/outputs/apk/release/*.apk
-            build/app/outputs/flutter-apk/*.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
