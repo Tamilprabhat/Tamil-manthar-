@@ -25,7 +25,7 @@ jobs:
 
       - name: Recreate Standard Android Files
         run: |
-          flutter create --platforms=android --org com.example .
+          flutter create --project-name tamil_manthar --platforms=android .
           mkdir -p android
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
