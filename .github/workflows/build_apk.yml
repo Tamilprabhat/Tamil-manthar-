@@ -9,11 +9,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
           java-version: '17'
@@ -21,27 +20,16 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
           channel: 'stable'
-          cache: true
 
-      - name: Ensure Android Structure
-        run: |
-          if [ ! -d "android" ] || [ ! -f "android/build.gradle" ]; then
-            flutter create --project-name tamil_manthar --platforms=android --org com.tamilmanthar.app .
-          fi
-          echo "android.enableNewDsl=false" >> android/gradle.properties
-          echo "android.useAndroidX=true" >> android/gradle.properties
-          echo "android.enableJetifier=true" >> android/gradle.properties
-
-      - name: Install Dependencies
+      - name: Get Dependencies
         run: flutter pub get
 
-      - name: Build Flutter APK
-        run: flutter build apk --release --no-tree-shake-icons
+      - name: Build APK
+        run: flutter build apk --release
 
-      - name: Upload APK Artifact
+      - name: Upload Clean APK Directly
         uses: actions/upload-artifact@v4
         with:
-          name: tamil-manthar-apk
+          name: tamil_manthar_app
           path: build/app/outputs/flutter-apk/app-release.apk
