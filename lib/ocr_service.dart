@@ -1,13 +1,13 @@
 import 'package:flutter_tesseract_ocr/flutter_tesseract_ocr.dart';
 
 class OcrService {
-  Future<String> extractTamil(String imagePath) async {
-    return FlutterTesseractOcr.extractText(
+  Future<String> extractText(String imagePath) async {
+    return await FlutterTesseractOcr.extractText(
       imagePath,
-      language: 'tam',
+      language: 'tam+eng',
       args: {
-        'psm': '6',
-        'preserve_interword_spaces': '1',
+        "preserve_interword_spaces": "1",
+        "psm": "3",
       },
     );
   }
