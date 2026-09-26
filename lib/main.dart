@@ -1,389 +1,271 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'ocr_service.dart';
 
 void main() {
   runApp(const TamilMantharApp());
 }
 
-class TamilMantharApp extends StatefulWidget {
+class TamilMantharApp extends StatelessWidget {
   const TamilMantharApp({super.key});
-
-  @override
-  State<TamilMantharApp> createState() => _TamilMantharAppState();
-}
-
-class _TamilMantharAppState extends State<TamilMantharApp> {
-  ThemeMode _themeMode = ThemeMode.dark;
-  double _fontSize = 16.0;
-
-  void _toggleTheme(bool isDark) {
-    setState(() {
-      _themeMode = isDark ? ThemeMode.dark : ThemeMode.light;
-    });
-  }
-
-  void _changeFontSize(double size) {
-    setState(() {
-      _fontSize = size;
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Tamil Manthar',
+      title: 'தமிழ் மாந்தர்',
       debugShowCheckedModeBanner: false,
-      themeMode: _themeMode,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.light,
-        colorSchemeSeed: Colors.deepPurple,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF121214),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFFB39DDB),
+          secondary: Color(0xFF9575CD),
+          surface: Color(0xFF1E1E24),
+        ),
       ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        colorSchemeSeed: Colors.deepPurple,
-      ),
-      home: HomePage(
-        isDark: _themeMode == ThemeMode.dark,
-        fontSize: _fontSize,
-        onThemeChanged: _toggleTheme,
-        onFontSizeChanged: _changeFontSize,
-      ),
+      home: const HomeScreen(),
     );
   }
 }
 
-class HomePage extends StatefulWidget {
-  final bool isDark;
-  final double fontSize;
-  final Function(bool) onThemeChanged;
-  final Function(double) onFontSizeChanged;
-
-  const HomePage({
-    super.key,
-    required this.isDark,
-    required this.fontSize,
-    required this.onThemeChanged,
-    required this.onFontSizeChanged,
-  });
+// முதல் திரை: முகப்புப் பக்கம் (Home Screen)
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomePageState extends State<HomePage> {
-  final _picker = ImagePicker();
-  final _ocr = OcrService();
-  final _textController = TextEditingController();
+class _HomeScreenState extends State<HomeScreen> {
+  final ImagePicker _picker = ImagePicker();
+  final OcrService _ocrService = OcrService();
+  bool _isLoading = false;
 
-  bool _busy = false;
-  String _status = 'படத்தைத் தேர்ந்தெடுத்து தமிழ் மற்றும் ஆங்கில உரையைப் பிரித்தெடுக்கவும்.';
-  final List<Map<String, String>> _savedDocuments = [];
-
-  Future<void> _pick(ImageSource source) async {
+  Future<void> _pickAndProcessImage(ImageSource source) async {
     try {
-      final image = await _picker.pickImage(source: source);
-      if (image == null) return;
+      final XFile? pickedFile = await _picker.pickImage(source: source);
+      if (pickedFile == null) return;
 
-      setState(() {
-        _busy = true;
-        _status = 'நிழல் நீக்கப்பட்டு உரை பிரித்தெடுக்கப்படுகிறது... காத்திருக்கவும்.';
-      });
-
-      final result = await _ocr.extractText(image.path);
-
-      setState(() {
-        _textController.text = result;
-        _status = result.trim().isEmpty
-            ? 'எழுத்துக்கள் எதுவும் கண்டறியப்படவில்லை.'
-            : 'OCR முடிந்தது (வெளிச்ச சீரமைப்புடன்).';
-      });
-    } catch (e) {
-      setState(() {
-        _status = 'OCR பிழை: $e';
-      });
-    } finally {
-      setState(() {
-        _busy = false;
-      });
-    }
-  }
-
-  void _saveAsDocument() {
-    if (_textController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('சேமிப்பதற்கு உரை எதுவும் இல்லை!')),
-      );
-      return;
-    }
-
-    final titleController = TextEditingController(
-      text: 'ஆவணம் ${_savedDocuments.length + 1}',
-    );
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('ஆவணமாகச் சேமிக்க'),
-        content: TextField(
-          controller: titleController,
-          decoration: const InputDecoration(
-            labelText: 'ஆவணத் தலைப்பு',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ரத்து'),
-          ),
-          FilledButton(
-            onPressed: () {
-              setState(() {
-                _savedDocuments.add({
-                  'title': titleController.text.trim(),
-                  'content': _textController.text,
-                  'date': DateTime.now().toString().substring(0, 16),
-                });
-              });
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('ஆவணம் வெற்றிகரமாகச் சேமிக்கப்பட்டது!')),
-              );
-            },
-            child: const Text('சேமி'),
+      // கிராப்பிங் திரை திறத்தல்
+      CroppedFile? croppedFile = await ImageCropper().cropImage(
+        sourcePath: pickedFile.path,
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'படத்தை ஒழுங்கமைக்கவும்',
+            toolbarColor: const Color(0xFF1E1E24),
+            toolbarWidgetColor: Colors.white,
+            initAspectRatio: CropAspectRatioPreset.original,
+            lockAspectRatio: false,
           ),
         ],
-      ),
-    );
-  }
+      );
 
-  void _openSavedDocuments() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.7,
-          minChildSize: 0.5,
-          maxChildSize: 0.95,
-          expand: false,
-          builder: (context, scrollController) {
-            return Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'சேமிக்கப்பட்ட ஆவணங்கள்',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context),
-                      )
-                    ],
-                  ),
-                  const Divider(),
-                  _savedDocuments.isEmpty
-                      ? const Expanded(
-                          child: Center(
-                            child: Text('ஆவணங்கள் எதுவும் இதுவரை சேமிக்கப்படவில்லை.'),
-                          ),
-                        )
-                      : Expanded(
-                          child: ListView.builder(
-                            controller: scrollController,
-                            itemCount: _savedDocuments.length,
-                            itemBuilder: (context, index) {
-                              final doc = _savedDocuments[index];
-                              return Card(
-                                margin: const EdgeInsets.symmetric(vertical: 6),
-                                child: ListTile(
-                                  leading: const Icon(Icons.description, color: Colors.deepPurple),
-                                  title: Text(doc['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  subtitle: Text(doc['date'] ?? ''),
-                                  trailing: IconButton(
-                                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                                    onPressed: () {
-                                      setState(() {
-                                        _savedDocuments.removeAt(index);
-                                      });
-                                      Navigator.pop(context);
-                                    },
-                                  ),
-                                  onTap: () {
-                                    setState(() {
-                                      _textController.text = doc['content'] ?? '';
-                                    });
-                                    Navigator.pop(context);
-                                  },
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
+      if (croppedFile == null) return;
+
+      setState(() => _isLoading = true);
+
+      // OCR மூலம் உரையைப் பிரித்தெடுத்தல்
+      String extractedText = await _ocrService.extractText(croppedFile.path);
+
+      setState(() => _isLoading = false);
+
+      if (!mounted) return;
+
+      // இரண்டாவது திரைக்குச் செல்லுதல் (A4 Document Editor)
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => DocumentEditorScreen(initialText: extractedText),
+        ),
+      );
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('பிழை: $e')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Column(
-          children: const [
-            Text('தமிழ் மாந்தர்', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 19)),
-            Text('Tamil Manthar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal)),
-          ],
-        ),
+        title: const Text('தமிழ் மாந்தர்', style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E24),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: Column(
+                  children: [
+                    const Text(
+                      'திறன் பார்வை',
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Smart Vision (Crop & OCR)',
+                      style: TextStyle(fontSize: 13, color: Colors.white60),
+                    ),
+                    const SizedBox(height: 28),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFB39DDB),
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                            ),
+                            onPressed: _isLoading ? null : () => _pickAndProcessImage(ImageSource.camera),
+                            icon: const Icon(Icons.camera_alt),
+                            label: const Text('புகைப்படம்', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white24),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                            ),
+                            onPressed: _isLoading ? null : () => _pickAndProcessImage(ImageSource.gallery),
+                            icon: const Icon(Icons.photo_library),
+                            label: const Text('Gallery', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              if (_isLoading)
+                const Column(
+                  children: [
+                    CircularProgressIndicator(color: Color(0xFFB39DDB)),
+                    SizedBox(height: 12),
+                    Text('படம் தூய்மைப்படுத்தப்பட்டு உரை வாசிக்கப்படுகிறது...', style: TextStyle(color: Colors.white70)),
+                  ],
+                )
+              else
+                const Text(
+                  'படத்தைத் தேர்ந்தெடுத்து துல்லியமாகத் தமிழ் மற்றும் ஆங்கில உரையைப் பிரித்தெடுக்கவும்.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white54, fontSize: 13),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// இரண்டாவது திரை: A4 தாள் ஆவண எடிட்டர் (Document Editor Screen)
+class DocumentEditorScreen extends StatefulWidget {
+  final String initialText;
+  const DocumentEditorScreen({super.key, required this.initialText});
+
+  @override
+  State<DocumentEditorScreen> createState() => _DocumentEditorScreenState();
+}
+
+class _DocumentEditorScreenState extends State<DocumentEditorScreen> {
+  late TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _copyToClipboard() {
+    Clipboard.setData(ClipboardData(text: _controller.text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('உரை நகலெடுக்கப்பட்டது!')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F0F12),
+      appBar: AppBar(
+        title: const Text('ஆவணத் தாள் (A4)', style: TextStyle(fontSize: 16)),
+        backgroundColor: const Color(0xFF1E1E24),
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.folder_open),
-            tooltip: 'Saved Documents',
-            onPressed: _openSavedDocuments,
+            icon: const Icon(Icons.copy),
+            tooltip: 'நகலெடு',
+            onPressed: _copyToClipboard,
           ),
           IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: 'Settings',
-            onPressed: () {
-              showModalBottomSheet(
-                context: context,
-                builder: (context) => Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SwitchListTile(
-                        title: const Text('இருள் முறை (Dark Mode)'),
-                        value: widget.isDark,
-                        onChanged: (val) {
-                          widget.onThemeChanged(val);
-                          Navigator.pop(context);
-                        },
-                      ),
-                      const SizedBox(height: 10),
-                      Text('எழுத்து அளவு: ${widget.fontSize.toInt()} sp'),
-                      Slider(
-                        min: 12.0,
-                        max: 26.0,
-                        divisions: 7,
-                        value: widget.fontSize,
-                        onChanged: (val) => widget.onFontSizeChanged(val),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
+            icon: const Icon(Icons.check),
+            tooltip: 'முடித்தல்',
+            onPressed: () => Navigator.pop(context),
           ),
         ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Card(
-                elevation: 2,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      const Text(
-                        'திறன் பார்வை',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                      ),
-                      const Text(
-                        'Smart Vision (Auto-Enhance & OCR)',
-                        style: TextStyle(fontSize: 13, color: Colors.grey),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: _busy ? null : () => _pick(ImageSource.camera),
-                              icon: const Icon(Icons.camera_alt),
-                              label: const Text('புகைப்படம்'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _busy ? null : () => _pick(ImageSource.gallery),
-                              icon: const Icon(Icons.photo_library),
-                              label: const Text('Gallery'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
+        child: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 600, minHeight: 700),
+            padding: const EdgeInsets.all(28.0),
+            decoration: BoxDecoration(
+              color: const Color(0xFF18181E),
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.5),
+                  blurRadius: 15,
+                  offset: const Offset(0, 5),
                 ),
+              ],
+              border: Border.all(color: Colors.white12),
+            ),
+            child: TextField(
+              controller: _controller,
+              maxLines: null,
+              keyboardType: TextInputType.multiline,
+              style: const TextStyle(
+                color: Color(0xFFE2E8F0),
+                fontSize: 16.0,
+                height: 1.8,
+                letterSpacing: 0.3,
+                fontFamily: 'Roboto',
               ),
-              const SizedBox(height: 12),
-              Text(_status, style: const TextStyle(fontWeight: FontWeight.w500)),
-              const SizedBox(height: 12),
-              Container(
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade400),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: TextField(
-                  controller: _textController,
-                  maxLines: 12,
-                  style: TextStyle(fontSize: widget.fontSize, height: 1.5),
-                  decoration: const InputDecoration(
-                    hintText: 'OCR உரை தானியங்கித் திருத்தங்களுடன் இங்கே தோன்றும்...',
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.all(12),
-                  ),
-                ),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                hintText: 'உரையை இங்கே தட்டச்சு செய்து திருத்தலாம்...',
+                hintStyle: TextStyle(color: Colors.white24),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: _saveAsDocument,
-                      icon: const Icon(Icons.save),
-                      label: const Text('ஆவணமாகச் சேமி'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: _textController.text));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('உரை நகலெடுக்கப்பட்டது!')),
-                        );
-                      },
-                      icon: const Icon(Icons.copy),
-                      label: const Text('நகலெடு'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
         ),
       ),
