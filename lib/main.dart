@@ -82,7 +82,12 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('தமிழ் மாந்தர்'),
+        title: Column(
+          children: const [
+            Text('தமிழ் மாந்தர்', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 19)),
+            Text('Tamil Manthar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal)),
+          ],
+        ),
         centerTitle: true,
       ),
       body: SafeArea(
@@ -95,8 +100,26 @@ class _HomePageState extends State<HomePage> {
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
-                      const Text(
-                        'திறன் பார்வை',
+                      Column(
+                      children: const [
+                        Text(
+                          'திறன் பார்வை',
+                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          'Smart Vision (Tamil & English OCR)',
+                          style: TextStyle(fontSize: 13, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'இணையம் இல்லாமலேயே தமிழ் மற்றும் ஆங்கில எழுத்துக்களை படத்திலிருந்து பிரித்தெடுக்கவும்.
+Extract Tamil & English text offline.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13),
+                    ),
+                    const SizedBox(height: 4),
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
