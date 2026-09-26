@@ -39,11 +39,12 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --stacktrace || ./gradlew assembleRelease 2>&1 | tail -n 60
+          ./gradlew assembleRelease
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: tamil-manthar-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            build/app/outputs/flutter-apk/*.apk
