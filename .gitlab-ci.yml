@@ -1,0 +1,18 @@
+image: ghcr.io/cirruslabs/flutter:stable
+
+stages:
+  - build
+
+build_apk:
+  stage: build
+  script:
+    - if [ ! -d "android" ]; then flutter create --platforms=android .; fi
+    - flutter pub get
+    - flutter build apk --release
+  artifacts:
+    name: "tamil-manthar-release-apk"
+    paths:
+      - build/app/outputs/flutter-apk/app-release.apk
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
