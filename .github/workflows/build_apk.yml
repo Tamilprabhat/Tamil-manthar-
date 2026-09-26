@@ -35,11 +35,15 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build APK
-        run: flutter build apk --release --verbose --no-tree-shake-icons
+      - name: Build APK Direct
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --stacktrace || ./gradlew assembleRelease 2>&1 | tail -n 60
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: tamil-manthar-apk
           path: build/app/outputs/flutter-apk/app-release.apk
