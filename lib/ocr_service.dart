@@ -3,6 +3,7 @@ import 'image_filter_service.dart';
 
 class OcrService {
   static final Map<String, String> _commonCorrections = {
+    'சயை': 'சபை',
     'துகி': 'துதி',
     'துகிக்கிடுவேனே': 'துதித்திடுவேனே',
     'துகித்திடும்': 'துதித்திடும்',
@@ -13,19 +14,24 @@ class OcrService {
     'நிறுக்கினீரோ': 'நிறுத்தினீரோ',
     'கடங்கிட்டாலும்': 'கடந்திட்டாலும்',
     'மாறிடீர்': 'மாறிடீர்',
+    'நடத்துதின்றது': 'நடத்துகின்றது',
+    'உயிர்ப்பிக்குமேண்': 'உயிர்ப்பிக்குமே',
+    'செய்தருளுமேண்': 'செய்தருளுமேன்',
+    'Cos': '',
     'crocs': '',
+    'ed': '',
   };
 
   Future<String> extractText(String originalImagePath) async {
-    // முதலில் நிழல் நீக்கப்பட்டு படம் கூர்மையாக்கப்படுகிறது
     String cleanImagePath = await ImageFilterService.cleanAndEnhanceForOcr(originalImagePath);
 
+    // PSM 6 பாடல் வரிகள் மற்றும் பத்திகளை வரிசை மாறாமல் வாசிக்கும்
     String text = await FlutterTesseractOcr.extractText(
       cleanImagePath,
       language: 'tam+eng',
       args: {
         "preserve_interword_spaces": "1",
-        "psm": "4",
+        "psm": "6",
       },
     );
 
@@ -43,6 +49,7 @@ class OcrService {
 
     for (var line in lines) {
       String trimmed = line.trim();
+      // ஒற்றை விளிம்புக் குப்பைகளை நீக்குதல்
       if (trimmed.isNotEmpty && trimmed.length > 1) {
         trimmed = trimmed.replaceAll(RegExp(r'[ \t]+'), ' ');
         validLines.add(trimmed);
