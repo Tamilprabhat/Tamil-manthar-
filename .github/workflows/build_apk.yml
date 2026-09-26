@@ -20,8 +20,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.19.6'
           channel: 'stable'
+
+      - name: Recreate Android Project Files
+        run: flutter create --platforms=android .
 
       - name: Get Dependencies
         run: flutter pub get
