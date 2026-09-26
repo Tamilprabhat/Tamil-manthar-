@@ -20,10 +20,15 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.24.5'
           channel: 'stable'
 
-      - name: Recreate Android Project Files
-        run: flutter create --platforms=android .
+      - name: Recreate Standard Android Files
+        run: |
+          flutter create --platforms=android --org com.example .
+          mkdir -p android
+          echo "android.useAndroidX=true" >> android/gradle.properties
+          echo "android.enableJetifier=true" >> android/gradle.properties
 
       - name: Get Dependencies
         run: flutter pub get
