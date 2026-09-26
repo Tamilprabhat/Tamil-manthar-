@@ -28,7 +28,7 @@ jobs:
       - name: Ensure Android Structure
         run: |
           if [ ! -d "android" ] || [ ! -f "android/build.gradle" ]; then
-            flutter create . --platforms=android --org com.tamilmanthar.app
+            flutter create --project-name tamil_manthar --platforms=android --org com.tamilmanthar.app .
           fi
           echo "android.enableNewDsl=false" >> android/gradle.properties
 
