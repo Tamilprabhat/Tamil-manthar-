@@ -23,29 +23,12 @@ jobs:
           flutter-version: '3.24.5'
           channel: 'stable'
 
-      - name: Recreate Android Project Files
+      - name: Recreate Standard Android Files
         run: |
           flutter create --project-name tamil_manthar --platforms=android .
           mkdir -p android
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
-          
-          # image_cropper-க்கு தேவையான UCropActivity-ஐ AndroidManifest.xml-ல் சேர்த்தல்
-          python3 -c "
-          p = 'android/app/src/main/AndroidManifest.xml'
-          with open(p, 'r') as f:
-              content = f.read()
-          cropper_activity = '''
-                  <activity
-                      android:name=\"com.yalantis.ucrop.UCropActivity\"
-                      android:screenOrientation=\"portrait\"
-                      android:theme=\"@style/Theme.AppCompat.Light.NoActionBar\"/>
-          '''
-          if 'UCropActivity' not in content:
-              content = content.replace('</application>', cropper_activity + '\n    </application>')
-          with open(p, 'w') as f:
-              f.write(content)
-          "
 
       - name: Get Dependencies
         run: flutter pub get
