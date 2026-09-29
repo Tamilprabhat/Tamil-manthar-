@@ -1,35 +1,44 @@
 import 'dart:io';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:flutter_tesseract_ocr/flutter_tesseract_ocr.dart';
 import 'package:image/image.dart' as img;
 
 class OcrService {
-  final TextRecognizer _textRecognizer = TextRecognizer(script: TextRecognitionScript.devanagari);
-
   Future<String> extractText(String imagePath) async {
     try {
       final imageBytes = await File(imagePath).readAsBytes();
       var originalImage = img.decodeImage(imageBytes);
 
-      String targetPath = imagePath;
+      String processedPath = imagePath;
+
       if (originalImage != null) {
-        // EXIF கோணத்தைச் சீரமைத்து சேமித்தல்
+        // பட சுழற்சியைச் சீரமைத்தல்
         originalImage = img.bakeOrientation(originalImage);
-        final normalizedFile = File('${imagePath}_mlkit_prep.jpg');
-        await normalizedFile.writeAsBytes(img.encodeJpg(originalImage, quality: 98));
-        targetPath = normalizedFile.path;
+
+        // மலர் பின்னணியை நீக்கி சிவப்பு எழுத்துக்களைத் தனியாகப் பிரிக்கும் கிரீன் சேனல் முறை
+        var gray = img.grayscale(originalImage);
+        gray = img.adjustColor(gray, contrast: 1.35, brightness: 1.05);
+
+        final tempFile = File('${imagePath}_clean.png');
+        await tempFile.writeAsBytes(img.encodePng(gray));
+        processedPath = tempFile.path;
       }
 
-      final inputImage = InputImage.fromFilePath(targetPath);
-      final RecognizedText recognizedText = await _textRecognizer.processImage(inputImage);
+      String rawText = await FlutterTesseractOcr.extractText(
+        processedPath,
+        language: 'tam+eng',
+        args: {
+          "psm": "6",
+          "preserve_interword_spaces": "1",
+        },
+      );
 
-      String rawText = recognizedText.text;
-      return _cleanTamilText(rawText);
+      return _processBilingualAndNumerals(rawText);
     } catch (e) {
       return "பிழை: $e";
     }
   }
 
-  String _cleanTamilText(String text) {
+  String _processBilingualAndNumerals(String text) {
     if (text.trim().isEmpty) return "";
 
     List<String> rawLines = text.split('\n');
@@ -39,7 +48,11 @@ class OcrService {
       String line = rawLine.trim();
       if (line.isEmpty) continue;
 
-      // அடைப்புக்குறி எண்கள் மற்றும் வரிசை எண்களைச் சீரமைத்தல்: (1) அல்லது [2] -> 1.
+      // உடைந்த ஆங்கில குப்பை எச்சங்களை நீக்குதல்
+      if (RegExp(r'^(?:[க-ளa-zA-Z\:\.\s]){1,5}$').hasMatch(line) && !line.contains(RegExp(r'\d'))) continue;
+      if (line.contains('Pena RR') || line.contains('sila ii')) continue;
+
+      // எண் வரிசைகளைச் சீரமைத்தல்
       line = line.replaceAllMapped(
         RegExp(r'^[\[\(]\s*(\d+)\s*[\]\)]\s*[\.\-\:]?\s*'),
         (m) => '${m[1]}. ',
@@ -50,7 +63,12 @@ class OcrService {
         (m) => '${m[1]}. ${m[2]}',
       );
 
-      // பொதுவான தமிழ் வார்த்தைச் சீரமைப்புகள்
+      // பொதுவான பாடல் தலைப்புகள்
+      line = line.replaceAll(RegExp(r'சரணங்கள்|சரணஙகள்', caseSensitive: false), 'சரணங்கள்');
+      line = line.replaceAll(RegExp(r'பல்லவி|பல்லவ|பலலவி', caseSensitive: false), 'பல்லவி');
+      line = line.replaceAll(RegExp(r'அனுபல்லவி|அநுபல்லவி', caseSensitive: false), 'அனுபல்லவி');
+
+      // எழுத்துப் பிழை திருத்தங்கள்
       line = line.replaceAll('சயை', 'சபை');
       line = line.replaceAll('நடத்துதின்றது', 'நடத்துகின்றது');
       line = line.replaceAll('உள்கமே', 'உள்ளமே');
@@ -62,9 +80,5 @@ class OcrService {
     }
 
     return formattedLines.join('\n\n');
-  }
-
-  void dispose() {
-    _textRecognizer.close();
   }
 }

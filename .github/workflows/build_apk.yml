@@ -70,7 +70,7 @@ jobs:
                   out_im.save(os.path.join(target_dir, 'ic_launcher.png'))
                   out_im.save(os.path.join(target_dir, 'ic_launcher_round.png'))
                   out_im.save(os.path.join(target_dir, 'ic_launcher_foreground.png'))
-              print('Royal Gold icon injected successfully!')
+              print('Royal Gold icon successfully placed!')
           "
 
       - name: Get Dependencies
