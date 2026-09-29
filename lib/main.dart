@@ -1,13 +1,16 @@
 import 'dart:io';
+import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
-import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'ocr_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const TamilMantharApp());
 }
 
@@ -19,45 +22,55 @@ class SavedDoc {
 
   SavedDoc({required this.id, required this.title, required this.content, required this.date});
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toMap() => {
     'id': id,
     'title': title,
     'content': content,
     'date': date.toIso8601String(),
   };
 
-  factory SavedDoc.fromJson(Map<String, dynamic> json) => SavedDoc(
-    id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
-    title: json['title'] ?? 'ஆவணம்',
-    content: json['content'] ?? '',
-    date: DateTime.tryParse(json['date'] ?? '') ?? DateTime.now(),
+  factory SavedDoc.fromMap(Map<String, dynamic> map) => SavedDoc(
+    id: map['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
+    title: map['title'] ?? 'ஆவணம்',
+    content: map['content'] ?? '',
+    date: DateTime.tryParse(map['date'] ?? '') ?? DateTime.now(),
   );
 }
 
-class StorageHelper {
-  static Future<File> _getFile() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/tamil_manthar_docs.json');
-  }
+class PrefsStorage {
+  static const String _key = 'tamil_manthar_saved_docs_v1';
 
-  static Future<List<SavedDoc>> loadDocs() async {
+  static Future<List<SavedDoc>> getDocs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? raw = prefs.getString(_key);
+    if (raw == null || raw.isEmpty) return [];
     try {
-      final file = await _getFile();
-      if (!await file.exists()) return [];
-      final content = await file.readAsString();
-      final List decoded = jsonDecode(content);
-      return decoded.map((e) => SavedDoc.fromJson(e)).toList();
+      final List decoded = jsonDecode(raw);
+      return decoded.map((e) => SavedDoc.fromMap(Map<String, dynamic>.from(e))).toList();
     } catch (_) {
       return [];
     }
   }
 
-  static Future<void> saveDocs(List<SavedDoc> docs) async {
-    try {
-      final file = await _getFile();
-      final encoded = jsonEncode(docs.map((e) => e.toJson()).toList());
-      await file.writeAsString(encoded);
-    } catch (_) {}
+  static Future<void> saveDoc(SavedDoc newDoc) async {
+    final prefs = await SharedPreferences.getInstance();
+    List<SavedDoc> list = await getDocs();
+    int idx = list.indexWhere((d) => d.id == newDoc.id);
+    if (idx >= 0) {
+      list[idx] = newDoc;
+    } else {
+      list.insert(0, newDoc);
+    }
+    final encoded = jsonEncode(list.map((d) => d.toMap()).toList());
+    await prefs.setString(_key, encoded);
+  }
+
+  static Future<void> deleteDoc(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    List<SavedDoc> list = await getDocs();
+    list.removeWhere((d) => d.id == id);
+    final encoded = jsonEncode(list.map((d) => d.toMap()).toList());
+    await prefs.setString(_key, encoded);
   }
 }
 
@@ -92,34 +105,61 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final ImagePicker _picker = ImagePicker();
   List<SavedDoc> _docs = [];
-  bool _loadingDocs = true;
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _reloadDocs();
+    _loadAllDocs();
   }
 
-  Future<void> _reloadDocs() async {
-    final list = await StorageHelper.loadDocs();
-    setState(() {
-      _docs = list;
-      _loadingDocs = false;
-    });
+  Future<void> _loadAllDocs() async {
+    final list = await PrefsStorage.getDocs();
+    if (mounted) {
+      setState(() {
+        _docs = list;
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<bool> _requestPermissions(ImageSource source) async {
+    if (source == ImageSource.camera) {
+      var status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (!mounted) return false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('கேமராவைப் பயன்படுத்த அனுமதி தேவை.')),
+        );
+        return false;
+      }
+    } else {
+      if (Platform.isAndroid) {
+        var status = await Permission.photos.request();
+        if (status.isPermanentlyDenied || (!status.isGranted && !await Permission.storage.request().isGranted)) {
+          // பல புதிய ஆண்ட்ராய்டுகளில் போட்டோ பிக்கர் தானாக அனுமதிக்கப்படும்
+        }
+      }
+    }
+    return true;
   }
 
   Future<void> _pickImage(ImageSource source) async {
     try {
+      bool granted = await _requestPermissions(source);
+      if (!granted && source == ImageSource.camera) return;
+
       final XFile? picked = await _picker.pickImage(source: source);
       if (picked == null) return;
 
       if (!mounted) return;
-      Navigator.push(
+      await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => MultiCornerCropScreen(imagePath: picked.path),
+          builder: (context) => FreeQuadCropScreen(imagePath: picked.path),
         ),
-      ).then((_) => _reloadDocs());
+      );
+      await _loadAllDocs();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('பிழை: $e')));
     }
@@ -134,9 +174,11 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-        child: Column(
+      body: RefreshIndicator(
+        onRefresh: _loadAllDocs,
+        color: const Color(0xFFB39DDB),
+        child: ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
           children: [
             Container(
               padding: const EdgeInsets.all(22),
@@ -144,16 +186,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: const Color(0xFF1E1E24),
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: Colors.white10),
-                boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4)),
-                ],
               ),
               child: Column(
                 children: [
-                  const Text('திறன் பார்வை (Smart OCR)',
-                      style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold, color: Colors.white)),
+                  const Text('திறன் பார்வை (Perspective Smart OCR)',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
                   const SizedBox(height: 6),
-                  const Text('தேவையான பகுதியை 4 மூலைகளிலும் இழுத்து அளவெடுத்து வெட்டி துல்லியமாக மாற்றலாம்',
+                  const Text('சாய்வாக உள்ள பக்கங்களின் 4 மூலைகளையும் இழுத்து துல்லியமாக வெட்டி மாற்றலாம்',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 12, color: Colors.white60)),
                   const SizedBox(height: 22),
@@ -191,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 26),
             Row(
               children: [
                 const Icon(Icons.folder_open, color: Color(0xFFB39DDB), size: 22),
@@ -201,71 +240,71 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            if (_loadingDocs)
-              const Padding(
-                padding: EdgeInsets.all(24.0),
-                child: CircularProgressIndicator(color: Color(0xFFB39DDB)),
+            if (_isLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32.0),
+                  child: CircularProgressIndicator(color: Color(0xFFB39DDB)),
+                ),
               )
             else if (_docs.isEmpty)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 36),
+                padding: const EdgeInsets.symmetric(vertical: 40),
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.white10),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: const Column(
                   children: [
-                    Icon(Icons.description_outlined, size: 48, color: Colors.white24),
-                    SizedBox(height: 10),
+                    Icon(Icons.description_outlined, size: 50, color: Colors.white24),
+                    SizedBox(height: 12),
                     Text('ஆவணங்கள் எதுவும் சேமிக்கப்படவில்லை', style: TextStyle(color: Colors.white54)),
                   ],
                 ),
               )
             else
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _docs.length,
-                itemBuilder: (context, index) {
-                  final doc = _docs[index];
-                  return Card(
-                    color: const Color(0xFF1E1E24),
-                    margin: const EdgeInsets.only(bottom: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    child: ListTile(
-                      leading: const CircleAvatar(
-                        backgroundColor: Color(0xFF2A2A35),
-                        child: Icon(Icons.article, color: Color(0xFFB39DDB)),
-                      ),
-                      title: Text(doc.title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(
-                        '${doc.date.day}/${doc.date.month}/${doc.date.year} • ${doc.content.replaceAll('\n', ' ')}',
+              ...List.generate(_docs.length, (index) {
+                final doc = _docs[index];
+                return Card(
+                  color: const Color(0xFF1E1E24),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: const CircleAvatar(
+                      backgroundColor: Color(0xFF2A2A35),
+                      child: Icon(Icons.article, color: Color(0xFFB39DDB)),
+                    ),
+                    title: Text(doc.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
-                      ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                        onPressed: () async {
-                          _docs.removeAt(index);
-                          await StorageHelper.saveDocs(_docs);
-                          setState(() {});
-                        },
-                      ),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => A4DocumentScreen(doc: doc),
-                          ),
-                        ).then((_) => _reloadDocs());
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                    subtitle: Text(
+                      '${doc.date.day}/${doc.date.month}/${doc.date.year} • ${doc.content.replaceAll('\n', ' ')}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 22),
+                      onPressed: () async {
+                        await PrefsStorage.deleteDoc(doc.id);
+                        await _loadAllDocs();
                       },
                     ),
-                  );
-                },
-              ),
+                    onTap: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => A4DocumentScreen(doc: doc),
+                        ),
+                      );
+                      await _loadAllDocs();
+                    },
+                  ),
+                );
+              }),
           ],
         ),
       ),
@@ -273,25 +312,37 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// 4 மூலைகளிலும் இழுத்து மாற்றும் கிராப் திரை
-class MultiCornerCropScreen extends StatefulWidget {
+// 4 மூலைகளிலும் 360° சாய்வு கோணத்தில் நகர்த்தக்கூடிய இலவச கிராப் திரை
+class FreeQuadCropScreen extends StatefulWidget {
   final String imagePath;
-  const MultiCornerCropScreen({super.key, required this.imagePath});
+  const FreeQuadCropScreen({super.key, required this.imagePath});
 
   @override
-  State<MultiCornerCropScreen> createState() => _MultiCornerCropScreenState();
+  State<FreeQuadCropScreen> createState() => _FreeQuadCropScreenState();
 }
 
-class _MultiCornerCropScreenState extends State<MultiCornerCropScreen> {
-  final OcrService _ocrService = OcrService();
+class _FreeQuadCropScreenState extends State<FreeQuadCropScreen> {
+  final OcrService _ocrService = _OcrWrapper();
   bool _isProcessing = false;
 
-  double _l = 30.0;
-  double _t = 80.0;
-  double _r = 330.0;
-  double _b = 520.0;
+  late Offset p1; // Top-Left
+  late Offset p2; // Top-Right
+  late Offset p3; // Bottom-Right
+  late Offset p4; // Bottom-Left
+  bool _initialized = false;
 
-  Future<void> _doCropAndOcr(Size previewSize) async {
+  void _initPoints(Size size) {
+    if (_initialized) return;
+    double w = size.width;
+    double h = size.height;
+    p1 = Offset(w * 0.08, h * 0.12);
+    p2 = Offset(w * 0.92, h * 0.12);
+    p3 = Offset(w * 0.92, h * 0.75);
+    p4 = Offset(w * 0.08, h * 0.75);
+    _initialized = true;
+  }
+
+  Future<void> _processCrop(Size displaySize) async {
     setState(() => _isProcessing = true);
     try {
       final bytes = await File(widget.imagePath).readAsBytes();
@@ -300,16 +351,21 @@ class _MultiCornerCropScreenState extends State<MultiCornerCropScreen> {
       String targetPath = widget.imagePath;
 
       if (original != null) {
-        double sx = original.width / previewSize.width;
-        double sy = original.height / previewSize.height;
+        double scaleX = original.width / displaySize.width;
+        double scaleY = original.height / displaySize.height;
 
-        int x = (_l * sx).round().clamp(0, original.width - 20);
-        int y = (_t * sy).round().clamp(0, original.height - 20);
-        int w = ((_r - _l) * sx).round().clamp(20, original.width - x);
-        int h = ((_b - _t) * sy).round().clamp(20, original.height - y);
+        double minX = [p1.dx, p2.dx, p3.dx, p4.dx].reduce(min);
+        double maxX = [p1.dx, p2.dx, p3.dx, p4.dx].reduce(max);
+        double minY = [p1.dy, p2.dy, p3.dy, p4.dy].reduce(min);
+        double maxY = [p1.dy, p2.dy, p3.dy, p4.dy].reduce(max);
 
-        final cropped = img.copyCrop(original, x: x, y: y, width: w, height: h);
-        final file = File('${widget.imagePath}_refined_crop.jpg');
+        int cropX = (minX * scaleX).round().clamp(0, original.width - 20);
+        int cropY = (minY * scaleY).round().clamp(0, original.height - 20);
+        int cropW = ((maxX - minX) * scaleX).round().clamp(20, original.width - cropX);
+        int cropH = ((maxY - minY) * scaleY).round().clamp(20, original.height - cropY);
+
+        final cropped = img.copyCrop(original, x: cropX, y: cropY, width: cropW, height: cropH);
+        final file = File('${widget.imagePath}_free_quad.jpg');
         await file.writeAsBytes(img.encodeJpg(cropped, quality: 95));
         targetPath = file.path;
       }
@@ -319,21 +375,24 @@ class _MultiCornerCropScreenState extends State<MultiCornerCropScreen> {
       if (!mounted) return;
       setState(() => _isProcessing = false);
 
-      String initialTitle = text.split('\n').first.replaceAll(RegExp(r'[^\w\s\u0B80-\u0BFF]'), '').trim();
-      if (initialTitle.isEmpty) initialTitle = "புதிய ஆவணம்";
-      if (initialTitle.length > 25) initialTitle = "${initialTitle.substring(0, 25)}...";
+      String title = text.split('\n').first.replaceAll(RegExp(r'[^\w\s\u0B80-\u0BFF]'), '').trim();
+      if (title.isEmpty) title = "புதிய ஆவணம்";
+      if (title.length > 25) title = "${title.substring(0, 25)}...";
 
       final newDoc = SavedDoc(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
-        title: initialTitle,
+        title: title,
         content: text,
         date: DateTime.now(),
       );
 
-      Navigator.pushReplacement(
+      await PrefsStorage.saveDoc(newDoc);
+
+      if (!mounted) return;
+      await Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => A4DocumentScreen(doc: newDoc, isNew: true),
+          builder: (context) => A4DocumentScreen(doc: newDoc),
         ),
       );
     } catch (e) {
@@ -346,11 +405,12 @@ class _MultiCornerCropScreenState extends State<MultiCornerCropScreen> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final viewHeight = size.height - 130;
+    final viewHeight = size.height - 140;
+    _initPoints(Size(size.width, viewHeight));
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('தேவையான பகுதியை அளவெடுக்கவும்', style: TextStyle(fontSize: 15)),
+        title: const Text('கோணத்திற்கேற்ப 4 மூலைகளைச் சீரமைக்கவும்', style: TextStyle(fontSize: 14)),
         backgroundColor: const Color(0xFF1E1E24),
       ),
       body: _isProcessing
@@ -360,7 +420,7 @@ class _MultiCornerCropScreenState extends State<MultiCornerCropScreen> {
                 children: [
                   CircularProgressIndicator(color: Color(0xFFB39DDB)),
                   SizedBox(height: 16),
-                  Text('படம் சீரமைக்கப்பட்டு உரை வாசிக்கப்படுகிறது...', style: TextStyle(color: Colors.white70)),
+                  Text('தேர்ந்தெடுத்த பகுதி வாசிக்கப்படுகிறது...', style: TextStyle(color: Colors.white70)),
                 ],
               ),
             )
@@ -370,77 +430,32 @@ class _MultiCornerCropScreenState extends State<MultiCornerCropScreen> {
                   bottom: 70,
                   child: Image.file(File(widget.imagePath), fit: BoxFit.fill),
                 ),
-                // கட்டத்தின் நடுப்பகுதியை நகர்த்தும் அமைப்பு
-                Positioned(
-                  left: _l,
-                  top: _t,
-                  width: _r - _l,
-                  height: _b - _t,
-                  child: GestureDetector(
-                    onPanUpdate: (d) {
-                      setState(() {
-                        double w = _r - _l;
-                        double h = _b - _t;
-                        double newL = (_l + d.delta.dx).clamp(10.0, size.width - w - 10.0);
-                        double newT = (_t + d.delta.dy).clamp(10.0, viewHeight - h - 10.0);
-                        _l = newL;
-                        _t = newT;
-                        _r = newL + w;
-                        _b = newT + h;
-                      });
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: const Color(0xFFB39DDB), width: 2.2),
-                        color: Colors.purple.withOpacity(0.12),
-                      ),
-                    ),
+                Positioned.fill(
+                  bottom: 70,
+                  child: CustomPaint(
+                    painter: QuadPolygonPainter(p1: p1, p2: p2, p3: p3, p4: p4),
                   ),
                 ),
-                // 1. Top-Left Handle
-                Positioned(
-                  left: _l - 16,
-                  top: _t - 16,
-                  child: _buildHandle((d) {
-                    setState(() {
-                      _l = (_l + d.delta.dx).clamp(10.0, _r - 50.0);
-                      _t = (_t + d.delta.dy).clamp(10.0, _b - 50.0);
-                    });
-                  }),
-                ),
-                // 2. Top-Right Handle
-                Positioned(
-                  left: _r - 16,
-                  top: _t - 16,
-                  child: _buildHandle((d) {
-                    setState(() {
-                      _r = (_r + d.delta.dx).clamp(_l + 50.0, size.width - 10.0);
-                      _t = (_t + d.delta.dy).clamp(10.0, _b - 50.0);
-                    });
-                  }),
-                ),
-                // 3. Bottom-Left Handle
-                Positioned(
-                  left: _l - 16,
-                  top: _b - 16,
-                  child: _buildHandle((d) {
-                    setState(() {
-                      _l = (_l + d.delta.dx).clamp(10.0, _r - 50.0);
-                      _b = (_b + d.delta.dy).clamp(_t + 50.0, viewHeight - 10.0);
-                    });
-                  }),
-                ),
-                // 4. Bottom-Right Handle
-                Positioned(
-                  left: _r - 16,
-                  top: _b - 16,
-                  child: _buildHandle((d) {
-                    setState(() {
-                      _r = (_r + d.delta.dx).clamp(_l + 50.0, size.width - 10.0);
-                      _b = (_b + d.delta.dy).clamp(_t + 50.0, viewHeight - 10.0);
-                    });
-                  }),
-                ),
+                _buildPin(p1, (d) {
+                  setState(() {
+                    p1 = Offset((p1.dx + d.delta.dx).clamp(0.0, size.width), (p1.dy + d.delta.dy).clamp(0.0, viewHeight));
+                  });
+                }),
+                _buildPin(p2, (d) {
+                  setState(() {
+                    p2 = Offset((p2.dx + d.delta.dx).clamp(0.0, size.width), (p2.dy + d.delta.dy).clamp(0.0, viewHeight));
+                  });
+                }),
+                _buildPin(p3, (d) {
+                  setState(() {
+                    p3 = Offset((p3.dx + d.delta.dx).clamp(0.0, size.width), (p3.dy + d.delta.dy).clamp(0.0, viewHeight));
+                  });
+                }),
+                _buildPin(p4, (d) {
+                  setState(() {
+                    p4 = Offset((p4.dx + d.delta.dx).clamp(0.0, size.width), (p4.dy + d.delta.dy).clamp(0.0, viewHeight));
+                  });
+                }),
                 Positioned(
                   bottom: 12,
                   left: 20,
@@ -452,7 +467,7 @@ class _MultiCornerCropScreenState extends State<MultiCornerCropScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                     ),
-                    onPressed: () => _doCropAndOcr(Size(size.width, viewHeight)),
+                    onPressed: () => _processCrop(Size(size.width, viewHeight)),
                     icon: const Icon(Icons.document_scanner),
                     label: const Text('இப்பகுதியை வாசி (OCR)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
@@ -462,28 +477,64 @@ class _MultiCornerCropScreenState extends State<MultiCornerCropScreen> {
     );
   }
 
-  Widget _buildHandle(GestureDragUpdateCallback onDrag) {
-    return GestureDetector(
-      onPanUpdate: onDrag,
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: const Color(0xFFB39DDB),
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2),
-          boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 4)],
+  Widget _buildPin(Offset pos, GestureDragUpdateCallback onDrag) {
+    return Positioned(
+      left: pos.dx - 22,
+      top: pos.dy - 22,
+      child: GestureDetector(
+        onPanUpdate: onDrag,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: const Color(0xFFB39DDB),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2.5),
+            boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 6)],
+          ),
+          child: const Center(
+            child: Icon(Icons.lens, size: 10, color: Colors.white),
+          ),
         ),
       ),
     );
   }
 }
 
-// நிஜமான வெள்ளை A4 தாள் போன்ற எடிட்டர் திரை
+class QuadPolygonPainter extends CustomPainter {
+  final Offset p1, p2, p3, p4;
+  QuadPolygonPainter({required this.p1, required this.p2, required this.p3, required this.p4});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..moveTo(p1.dx, p1.dy)
+      ..lineTo(p2.dx, p2.dy)
+      ..lineTo(p3.dx, p3.dy)
+      ..lineTo(p4.dx, p4.dy)
+      ..close();
+
+    final fillPaint = Paint()
+      ..color = const Color(0xFFB39DDB).withOpacity(0.18)
+      ..style = PaintingStyle.fill;
+
+    final borderPaint = Paint()
+      ..color = const Color(0xFFB39DDB)
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke;
+
+    canvas.drawPath(path, fillPaint);
+    canvas.drawPath(path, borderPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant QuadPolygonPainter oldDelegate) => true;
+}
+
+// நிஜமான A4 தாள் போன்ற எடிட்டர்
 class A4DocumentScreen extends StatefulWidget {
   final SavedDoc doc;
-  final bool isNew;
-  const A4DocumentScreen({super.key, required this.doc, this.isNew = false});
+  const A4DocumentScreen({super.key, required this.doc});
 
   @override
   State<A4DocumentScreen> createState() => _A4DocumentScreenState();
@@ -509,7 +560,6 @@ class _A4DocumentScreenState extends State<A4DocumentScreen> {
   }
 
   Future<void> _saveAndExit() async {
-    final docs = await StorageHelper.loadDocs();
     final updatedDoc = SavedDoc(
       id: widget.doc.id,
       title: _titleController.text.trim().isEmpty ? 'ஆவணம்' : _titleController.text.trim(),
@@ -517,18 +567,11 @@ class _A4DocumentScreenState extends State<A4DocumentScreen> {
       date: DateTime.now(),
     );
 
-    int idx = docs.indexWhere((e) => e.id == widget.doc.id);
-    if (idx >= 0) {
-      docs[idx] = updatedDoc;
-    } else {
-      docs.insert(0, updatedDoc);
-    }
-
-    await StorageHelper.saveDocs(docs);
+    await PrefsStorage.saveDoc(updatedDoc);
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('ஆவணம் போனில் நிரந்தரமாகச் சேமிக்கப்பட்டது!')),
+      const SnackBar(content: Text('ஆவணம் வெற்றிகரமாகச் சேமிக்கப்பட்டது!')),
     );
     Navigator.pop(context);
   }
@@ -536,7 +579,7 @@ class _A4DocumentScreenState extends State<A4DocumentScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF2A2A32),
+      backgroundColor: const Color(0xFF222228),
       appBar: AppBar(
         title: const Text('A4 ஆவணத் தாள்', style: TextStyle(fontSize: 16)),
         backgroundColor: const Color(0xFF1E1E24),
@@ -544,12 +587,12 @@ class _A4DocumentScreenState extends State<A4DocumentScreen> {
           IconButton(
             icon: const Icon(Icons.zoom_in),
             tooltip: 'எழுத்துப் பெரிதாக்கு',
-            onPressed: () => setState(() => _fontSize = (_fontSize + 2).clamp(12.0, 30.0)),
+            onPressed: () => setState(() => _fontSize = (_fontSize + 2).clamp(12.0, 32.0)),
           ),
           IconButton(
             icon: const Icon(Icons.zoom_out),
             tooltip: 'எழுத்துச் சிறிதாக்கு',
-            onPressed: () => setState(() => _fontSize = (_fontSize - 2).clamp(12.0, 30.0)),
+            onPressed: () => setState(() => _fontSize = (_fontSize - 2).clamp(12.0, 32.0)),
           ),
           IconButton(
             icon: const Icon(Icons.copy),
@@ -567,19 +610,18 @@ class _A4DocumentScreenState extends State<A4DocumentScreen> {
         ],
       ),
       body: InteractiveViewer(
-        boundaryMargin: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 40.0),
+        boundaryMargin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 30.0),
         minScale: 0.7,
-        maxScale: 2.2,
+        maxScale: 2.5,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 20.0),
           child: Center(
             child: Container(
-              // சர்வதேச A4 விகிதம் (Standard A4 Dimension)
               width: 595,
               constraints: const BoxConstraints(minHeight: 842),
-              padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 48.0),
+              padding: const EdgeInsets.symmetric(horizontal: 36.0, vertical: 40.0),
               decoration: BoxDecoration(
-                color: Colors.white, // நிஜமான காகித வெள்ளை நிறம்
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(4),
                 boxShadow: const [
                   BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, 10)),
@@ -591,7 +633,7 @@ class _A4DocumentScreenState extends State<A4DocumentScreen> {
                   TextField(
                     controller: _titleController,
                     style: const TextStyle(
-                      color: Color(0xFF1A1A1A),
+                      color: Color(0xFF111111),
                       fontSize: 20.0,
                       fontWeight: FontWeight.bold,
                     ),
@@ -612,7 +654,6 @@ class _A4DocumentScreenState extends State<A4DocumentScreen> {
                       fontSize: _fontSize,
                       height: 1.85,
                       letterSpacing: 0.35,
-                      fontFamily: 'sans-serif',
                     ),
                     decoration: const InputDecoration(
                       border: InputBorder.none,
@@ -629,3 +670,6 @@ class _A4DocumentScreenState extends State<A4DocumentScreen> {
     );
   }
 }
+
+// பழைய OcrService இன்ஸ்டன்ஸைப் பாதுகாப்பாகப் பயன்படுத்தும் ரேப்பர்
+class _OcrWrapper extends OcrService {}

@@ -7,6 +7,8 @@ environment:
   sdk: ">=3.0.0 <4.0.0"
 
 dependencies:
+  permission_handler: ^11.3.1
+  shared_preferences: ^2.2.2
   path_provider: ^2.1.2
   flutter:
     sdk: flutter
@@ -15,6 +17,8 @@ dependencies:
   flutter_tesseract_ocr: ^0.4.31
 
 dev_dependencies:
+  permission_handler: ^11.3.1
+  shared_preferences: ^2.2.2
   path_provider: ^2.1.2
   flutter_test:
     sdk: flutter

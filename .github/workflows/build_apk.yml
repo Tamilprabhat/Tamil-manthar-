@@ -29,6 +29,22 @@ jobs:
           mkdir -p android
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
+          
+          # கேமரா & மீடியா அனுமதிகளை AndroidManifest.xml-ல் பதிவு செய்தல்
+          python3 -c "
+          p = 'android/app/src/main/AndroidManifest.xml'
+          with open(p, 'r') as f:
+              c = f.read()
+          perms = '''
+              <uses-permission android:name=\"android.permission.CAMERA\" />
+              <uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" />
+              <uses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\" />
+          '''
+          if 'android.permission.CAMERA' not in c:
+              c = c.replace('<application', perms + '\n    <application')
+          with open(p, 'w') as f:
+              f.write(c)
+          "
 
       - name: Get Dependencies
         run: flutter pub get
