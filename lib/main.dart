@@ -52,7 +52,6 @@ class PrefsStorage {
     }
   }
 
-  // ஒரே பெயரில் உள்ள தலைப்புகளைக் கண்டறிந்து (1), (2) என மாற்றும் முறை
   static String generateUniqueTitle(List<SavedDoc> existingDocs, String baseTitle, {String? excludeId}) {
     String cleanBase = baseTitle.replaceAll(RegExp(r'\s*\(\d+\)$'), '').trim();
     if (cleanBase.isEmpty) cleanBase = 'ஆவணம்';
@@ -79,8 +78,6 @@ class PrefsStorage {
   static Future<void> saveDoc(SavedDoc newDoc) async {
     final prefs = await SharedPreferences.getInstance();
     List<SavedDoc> list = await getDocs();
-    
-    // தலைப்பை சரிபார்த்து அடைப்புக்குறிக்குள் எண் சேர்த்தல்
     newDoc.title = generateUniqueTitle(list, newDoc.title, excludeId: newDoc.id);
 
     int idx = list.indexWhere((d) => d.id == newDoc.id);
@@ -89,16 +86,14 @@ class PrefsStorage {
     } else {
       list.insert(0, newDoc);
     }
-    final encoded = jsonEncode(list.map((d) => d.toMap()).toList());
-    await prefs.setString(_key, encoded);
+    await prefs.setString(_key, jsonEncode(list.map((d) => d.toMap()).toList()));
   }
 
   static Future<void> deleteDoc(String id) async {
     final prefs = await SharedPreferences.getInstance();
     List<SavedDoc> list = await getDocs();
     list.removeWhere((d) => d.id == id);
-    final encoded = jsonEncode(list.map((d) => d.toMap()).toList());
-    await prefs.setString(_key, encoded);
+    await prefs.setString(_key, jsonEncode(list.map((d) => d.toMap()).toList()));
   }
 }
 
@@ -181,7 +176,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => FreeQuadCropScreen(imagePath: picked.path),
+          builder: (context) => PrecisePerspectiveCropScreen(imagePath: picked.path),
         ),
       );
       await _loadAllDocs();
@@ -217,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const Text('திறன் பார்வை (Perspective Smart OCR)',
                       style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
                   const SizedBox(height: 6),
-                  const Text('சாய்வாக உள்ள பக்கங்களின் 4 மூலைகளையும் இழுத்து துல்லியமாக வெட்டி மாற்றலாம்',
+                  const Text('தேர்ந்தெடுத்த வரியை மட்டும் துல்லியமாக வெட்டி மாற்றலாம்',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 12, color: Colors.white60)),
                   const SizedBox(height: 22),
@@ -337,15 +332,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class FreeQuadCropScreen extends StatefulWidget {
+// திரையின் விகிதப் பிழையை நீக்கி துல்லியமாக வெட்டும் புதிய கிராப் திரை
+class PrecisePerspectiveCropScreen extends StatefulWidget {
   final String imagePath;
-  const FreeQuadCropScreen({super.key, required this.imagePath});
+  const PrecisePerspectiveCropScreen({super.key, required this.imagePath});
 
   @override
-  State<FreeQuadCropScreen> createState() => _FreeQuadCropScreenState();
+  State<PrecisePerspectiveCropScreen> createState() => _PrecisePerspectiveCropScreenState();
 }
 
-class _FreeQuadCropScreenState extends State<FreeQuadCropScreen> {
+class _PrecisePerspectiveCropScreenState extends State<PrecisePerspectiveCropScreen> {
   final OcrService _ocrService = OcrService();
   bool _isProcessing = false;
 
@@ -354,42 +350,61 @@ class _FreeQuadCropScreenState extends State<FreeQuadCropScreen> {
   late Offset p3;
   late Offset p4;
   bool _initialized = false;
+  img.Image? _decodedImg;
 
-  void _initPoints(Size size) {
+  @override
+  void initState() {
+    super.initState();
+    _loadImage();
+  }
+
+  Future<void> _loadImage() async {
+    final bytes = await File(widget.imagePath).readAsBytes();
+    final decoded = img.decodeImage(bytes);
+    if (mounted) {
+      setState(() {
+        _decodedImg = decoded;
+      });
+    }
+  }
+
+  void _initPoints(Rect renderRect) {
     if (_initialized) return;
-    double w = size.width;
-    double h = size.height;
-    p1 = Offset(w * 0.08, h * 0.12);
-    p2 = Offset(w * 0.92, h * 0.12);
-    p3 = Offset(w * 0.92, h * 0.75);
-    p4 = Offset(w * 0.08, h * 0.75);
+    p1 = Offset(renderRect.left + renderRect.width * 0.08, renderRect.top + renderRect.height * 0.15);
+    p2 = Offset(renderRect.left + renderRect.width * 0.92, renderRect.top + renderRect.height * 0.15);
+    p3 = Offset(renderRect.left + renderRect.width * 0.92, renderRect.top + renderRect.height * 0.70);
+    p4 = Offset(renderRect.left + renderRect.width * 0.08, renderRect.top + renderRect.height * 0.70);
     _initialized = true;
   }
 
-  Future<void> _processCrop(Size displaySize) async {
+  Future<void> _processCrop(Rect renderRect) async {
     setState(() => _isProcessing = true);
     try {
-      final bytes = await File(widget.imagePath).readAsBytes();
-      final original = img.decodeImage(bytes);
-
       String targetPath = widget.imagePath;
 
-      if (original != null) {
-        double scaleX = original.width / displaySize.width;
-        double scaleY = original.height / displaySize.height;
+      if (_decodedImg != null) {
+        // துல்லியமான பிக்சல் விகிதம் (Display Rect to Original Image Pixels)
+        double scaleX = _decodedImg!.width / renderRect.width;
+        double scaleY = _decodedImg!.height / renderRect.height;
 
-        double minX = [p1.dx, p2.dx, p3.dx, p4.dx].reduce(min);
-        double maxX = [p1.dx, p2.dx, p3.dx, p4.dx].reduce(max);
-        double minY = [p1.dy, p2.dy, p3.dy, p4.dy].reduce(min);
-        double maxY = [p1.dy, p2.dy, p3.dy, p4.dy].reduce(max);
+        double minX = [p1.dx, p2.dx, p3.dx, p4.dx].reduce(min) - renderRect.left;
+        double maxX = [p1.dx, p2.dx, p3.dx, p4.dx].reduce(max) - renderRect.left;
+        double minY = [p1.dy, p2.dy, p3.dy, p4.dy].reduce(min) - renderRect.top;
+        double maxY = [p1.dy, p2.dy, p3.dy, p4.dy].reduce(max) - renderRect.top;
 
-        int cropX = (minX * scaleX).round().clamp(0, original.width - 20);
-        int cropY = (minY * scaleY).round().clamp(0, original.height - 20);
-        int cropW = ((maxX - minX) * scaleX).round().clamp(20, original.width - cropX);
-        int cropH = ((maxY - minY) * scaleY).round().clamp(20, original.height - cropY);
+        int cropX = (minX * scaleX).round().clamp(0, _decodedImg!.width - 10);
+        int cropY = (minY * scaleY).round().clamp(0, _decodedImg!.height - 10);
+        int cropW = ((maxX - minX) * scaleX).round().clamp(20, _decodedImg!.width - cropX);
+        int cropH = ((maxY - minY) * scaleY).round().clamp(20, _decodedImg!.height - cropY);
 
-        final cropped = img.copyCrop(original, x: cropX, y: cropY, width: cropW, height: cropH);
-        final file = File('${widget.imagePath}_free_quad.jpg');
+        // மேலே உள்ள விளிம்புப் பிழையைத் தவிர்க்க 8 பிக்சல் உள்வெட்டு (Safe Inset)
+        if (cropY + 8 < _decodedImg!.height && cropH > 20) {
+          cropY += 8;
+          cropH -= 8;
+        }
+
+        final cropped = img.copyCrop(_decodedImg!, x: cropX, y: cropY, width: cropW, height: cropH);
+        final file = File('${widget.imagePath}_exact_crop.jpg');
         await file.writeAsBytes(img.encodeJpg(cropped, quality: 95));
         targetPath = file.path;
       }
@@ -410,7 +425,6 @@ class _FreeQuadCropScreenState extends State<FreeQuadCropScreen> {
         date: DateTime.now(),
       );
 
-      // பெயரிடலில் தானாகவே (1), (2) என சேர்க்கப்படும்
       await PrefsStorage.saveDoc(newDoc);
 
       if (!mounted) return;
@@ -431,11 +445,36 @@ class _FreeQuadCropScreenState extends State<FreeQuadCropScreen> {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final viewHeight = size.height - 140;
-    _initPoints(Size(size.width, viewHeight));
+
+    if (_decodedImg == null) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF101014),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFFB39DDB))),
+      );
+    }
+
+    // படத்தில் உள்ள உண்மையான அளவு மற்றும் விகிதத்தைக் கணக்கிடுதல்
+    double imgAspect = _decodedImg!.width / _decodedImg!.height;
+    double viewAspect = size.width / viewHeight;
+
+    double renderW, renderH, offsetX, offsetY;
+    if (imgAspect > viewAspect) {
+      renderW = size.width;
+      renderH = size.width / imgAspect;
+      offsetX = 0;
+      offsetY = (viewHeight - renderH) / 2;
+    } else {
+      renderH = viewHeight;
+      renderW = viewHeight * imgAspect;
+      offsetX = (size.width - renderW) / 2;
+      offsetY = 0;
+    }
+    final renderRect = Rect.fromLTWH(offsetX, offsetY, renderW, renderH);
+    _initPoints(renderRect);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('கோணத்திற்கேற்ப 4 மூலைகளைச் சீரமைக்கவும்', style: TextStyle(fontSize: 14)),
+        title: const Text('துல்லியமாக மூலைகளைச் சீரமைக்கவும்', style: TextStyle(fontSize: 14)),
         backgroundColor: const Color(0xFF1E1E24),
       ),
       body: _isProcessing
@@ -445,14 +484,17 @@ class _FreeQuadCropScreenState extends State<FreeQuadCropScreen> {
                 children: [
                   CircularProgressIndicator(color: Color(0xFFB39DDB)),
                   SizedBox(height: 16),
-                  Text('தேர்ந்தெடுத்த பகுதி வாசிக்கப்படுகிறது...', style: TextStyle(color: Colors.white70)),
+                  Text('தேர்ந்தெடுத்த பகுதி மட்டும் வாசிக்கப்படுகிறது...', style: TextStyle(color: Colors.white70)),
                 ],
               ),
             )
           : Stack(
               children: [
-                Positioned.fill(
-                  bottom: 70,
+                Positioned(
+                  left: renderRect.left,
+                  top: renderRect.top,
+                  width: renderRect.width,
+                  height: renderRect.height,
                   child: Image.file(File(widget.imagePath), fit: BoxFit.fill),
                 ),
                 Positioned.fill(
@@ -463,22 +505,26 @@ class _FreeQuadCropScreenState extends State<FreeQuadCropScreen> {
                 ),
                 _buildPin(p1, (d) {
                   setState(() {
-                    p1 = Offset((p1.dx + d.delta.dx).clamp(0.0, size.width), (p1.dy + d.delta.dy).clamp(0.0, viewHeight));
+                    p1 = Offset((p1.dx + d.delta.dx).clamp(renderRect.left, renderRect.right),
+                                (p1.dy + d.delta.dy).clamp(renderRect.top, renderRect.bottom));
                   });
                 }),
                 _buildPin(p2, (d) {
                   setState(() {
-                    p2 = Offset((p2.dx + d.delta.dx).clamp(0.0, size.width), (p2.dy + d.delta.dy).clamp(0.0, viewHeight));
+                    p2 = Offset((p2.dx + d.delta.dx).clamp(renderRect.left, renderRect.right),
+                                (p2.dy + d.delta.dy).clamp(renderRect.top, renderRect.bottom));
                   });
                 }),
                 _buildPin(p3, (d) {
                   setState(() {
-                    p3 = Offset((p3.dx + d.delta.dx).clamp(0.0, size.width), (p3.dy + d.delta.dy).clamp(0.0, viewHeight));
+                    p3 = Offset((p3.dx + d.delta.dx).clamp(renderRect.left, renderRect.right),
+                                (p3.dy + d.delta.dy).clamp(renderRect.top, renderRect.bottom));
                   });
                 }),
                 _buildPin(p4, (d) {
                   setState(() {
-                    p4 = Offset((p4.dx + d.delta.dx).clamp(0.0, size.width), (p4.dy + d.delta.dy).clamp(0.0, viewHeight));
+                    p4 = Offset((p4.dx + d.delta.dx).clamp(renderRect.left, renderRect.right),
+                                (p4.dy + d.delta.dy).clamp(renderRect.top, renderRect.bottom));
                   });
                 }),
                 Positioned(
@@ -492,7 +538,7 @@ class _FreeQuadCropScreenState extends State<FreeQuadCropScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                     ),
-                    onPressed: () => _processCrop(Size(size.width, viewHeight)),
+                    onPressed: () => _processCrop(renderRect),
                     icon: const Icon(Icons.document_scanner),
                     label: const Text('இப்பகுதியை வாசி (OCR)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
