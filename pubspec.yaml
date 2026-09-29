@@ -7,6 +7,7 @@ environment:
   sdk: ">=3.0.0 <4.0.0"
 
 dependencies:
+  google_mlkit_text_recognition: ^0.13.0
   permission_handler: ^11.3.1
   shared_preferences: ^2.2.2
   path_provider: ^2.1.2
@@ -14,9 +15,10 @@ dependencies:
     sdk: flutter
   image_picker: ^1.1.2
   image: ^4.2.0
-  flutter_tesseract_ocr: ^0.4.31
+  # flutter_tesseract_ocr: ^0.4.31
 
 dev_dependencies:
+  google_mlkit_text_recognition: ^0.13.0
   flutter_launcher_icons: ^0.13.1
   permission_handler: ^11.3.1
   shared_preferences: ^2.2.2

@@ -23,6 +23,9 @@ jobs:
           flutter-version: '3.24.5'
           channel: 'stable'
 
+      - name: Install Python Pillow
+        run: python3 -m pip install --upgrade Pillow
+
       - name: Recreate Android Structure & Inject Royal Gold Icon
         run: |
           flutter create --project-name tamil_manthar --platforms=android .
@@ -30,7 +33,6 @@ jobs:
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
           
-          # கேமரா அனுமதிகளை Manifest-ல் சேர்த்தல்
           python3 -c "
           p = 'android/app/src/main/AndroidManifest.xml'
           with open(p, 'r') as f:
@@ -46,7 +48,6 @@ jobs:
               f.write(c)
           "
 
-          # அசல் ராயல் லோகோவை Android-ன் அனைத்து mipmap கோப்புறைகளிலும் நேரடியாகப் பதிவேற்றுதல்
           python3 -c "
           import os
           from PIL import Image
@@ -67,10 +68,9 @@ jobs:
                   os.makedirs(target_dir, exist_ok=True)
                   out_im = im.resize(size, Image.Resampling.LANCZOS)
                   out_im.save(os.path.join(target_dir, 'ic_launcher.png'))
-                  # ஆண்ட்ராய்டு அடாப்டிவ் ஐகான்களுக்கும் ஒரே லோகோ
                   out_im.save(os.path.join(target_dir, 'ic_launcher_round.png'))
                   out_im.save(os.path.join(target_dir, 'ic_launcher_foreground.png'))
-              print('Successfully injected Royal Gold icons into all mipmap folders!')
+              print('Royal Gold icon injected successfully!')
           "
 
       - name: Get Dependencies

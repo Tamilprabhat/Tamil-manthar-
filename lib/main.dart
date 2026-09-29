@@ -169,7 +169,10 @@ class _HomeScreenState extends State<HomeScreen> {
       bool granted = await _requestPermissions(source);
       if (!granted && source == ImageSource.camera) return;
 
-      final XFile? picked = await _picker.pickImage(source: source);
+      final XFile? picked = await _picker.pickImage(
+        source: source,
+        imageQuality: 100,
+      );
       if (picked == null) return;
 
       if (!mounted) return;
@@ -209,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               child: Column(
                 children: [
-                  const Text('திறன் பார்வை (Perspective Smart OCR)',
+                  const Text('திறன் பார்வை (Google ML Smart OCR)',
                       style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
                   const SizedBox(height: 6),
                   const Text('தேர்ந்தெடுத்த வரியை மட்டும் துல்லியமாக வெட்டி மாற்றலாம்',
@@ -332,7 +335,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// திரையின் விகிதப் பிழையை நீக்கி துல்லியமாக வெட்டும் புதிய கிராப் திரை
 class PrecisePerspectiveCropScreen extends StatefulWidget {
   final String imagePath;
   const PrecisePerspectiveCropScreen({super.key, required this.imagePath});
@@ -351,6 +353,7 @@ class _PrecisePerspectiveCropScreenState extends State<PrecisePerspectiveCropScr
   late Offset p4;
   bool _initialized = false;
   img.Image? _decodedImg;
+  String? _normalizedPath;
 
   @override
   void initState() {
@@ -360,30 +363,36 @@ class _PrecisePerspectiveCropScreenState extends State<PrecisePerspectiveCropScr
 
   Future<void> _loadImage() async {
     final bytes = await File(widget.imagePath).readAsBytes();
-    final decoded = img.decodeImage(bytes);
-    if (mounted) {
-      setState(() {
-        _decodedImg = decoded;
-      });
+    var decoded = img.decodeImage(bytes);
+    if (decoded != null) {
+      decoded = img.bakeOrientation(decoded);
+      final normalizedFile = File('${widget.imagePath}_oriented.jpg');
+      await normalizedFile.writeAsBytes(img.encodeJpg(decoded, quality: 98));
+
+      if (mounted) {
+        setState(() {
+          _decodedImg = decoded;
+          _normalizedPath = normalizedFile.path;
+        });
+      }
     }
   }
 
   void _initPoints(Rect renderRect) {
     if (_initialized) return;
-    p1 = Offset(renderRect.left + renderRect.width * 0.08, renderRect.top + renderRect.height * 0.15);
-    p2 = Offset(renderRect.left + renderRect.width * 0.92, renderRect.top + renderRect.height * 0.15);
-    p3 = Offset(renderRect.left + renderRect.width * 0.92, renderRect.top + renderRect.height * 0.70);
-    p4 = Offset(renderRect.left + renderRect.width * 0.08, renderRect.top + renderRect.height * 0.70);
+    p1 = Offset(renderRect.left + renderRect.width * 0.08, renderRect.top + renderRect.height * 0.25);
+    p2 = Offset(renderRect.left + renderRect.width * 0.92, renderRect.top + renderRect.height * 0.25);
+    p3 = Offset(renderRect.left + renderRect.width * 0.92, renderRect.top + renderRect.height * 0.65);
+    p4 = Offset(renderRect.left + renderRect.width * 0.08, renderRect.top + renderRect.height * 0.65);
     _initialized = true;
   }
 
   Future<void> _processCrop(Rect renderRect) async {
     setState(() => _isProcessing = true);
     try {
-      String targetPath = widget.imagePath;
+      String targetPath = _normalizedPath ?? widget.imagePath;
 
       if (_decodedImg != null) {
-        // துல்லியமான பிக்சல் விகிதம் (Display Rect to Original Image Pixels)
         double scaleX = _decodedImg!.width / renderRect.width;
         double scaleY = _decodedImg!.height / renderRect.height;
 
@@ -397,15 +406,9 @@ class _PrecisePerspectiveCropScreenState extends State<PrecisePerspectiveCropScr
         int cropW = ((maxX - minX) * scaleX).round().clamp(20, _decodedImg!.width - cropX);
         int cropH = ((maxY - minY) * scaleY).round().clamp(20, _decodedImg!.height - cropY);
 
-        // மேலே உள்ள விளிம்புப் பிழையைத் தவிர்க்க 8 பிக்சல் உள்வெட்டு (Safe Inset)
-        if (cropY + 8 < _decodedImg!.height && cropH > 20) {
-          cropY += 8;
-          cropH -= 8;
-        }
-
         final cropped = img.copyCrop(_decodedImg!, x: cropX, y: cropY, width: cropW, height: cropH);
         final file = File('${widget.imagePath}_exact_crop.jpg');
-        await file.writeAsBytes(img.encodeJpg(cropped, quality: 95));
+        await file.writeAsBytes(img.encodeJpg(cropped, quality: 98));
         targetPath = file.path;
       }
 
@@ -446,14 +449,13 @@ class _PrecisePerspectiveCropScreenState extends State<PrecisePerspectiveCropScr
     final size = MediaQuery.of(context).size;
     final viewHeight = size.height - 140;
 
-    if (_decodedImg == null) {
+    if (_decodedImg == null || _normalizedPath == null) {
       return const Scaffold(
         backgroundColor: Color(0xFF101014),
         body: Center(child: CircularProgressIndicator(color: Color(0xFFB39DDB))),
       );
     }
 
-    // படத்தில் உள்ள உண்மையான அளவு மற்றும் விகிதத்தைக் கணக்கிடுதல்
     double imgAspect = _decodedImg!.width / _decodedImg!.height;
     double viewAspect = size.width / viewHeight;
 
@@ -484,7 +486,7 @@ class _PrecisePerspectiveCropScreenState extends State<PrecisePerspectiveCropScr
                 children: [
                   CircularProgressIndicator(color: Color(0xFFB39DDB)),
                   SizedBox(height: 16),
-                  Text('தேர்ந்தெடுத்த பகுதி மட்டும் வாசிக்கப்படுகிறது...', style: TextStyle(color: Colors.white70)),
+                  Text('தேர்ந்தெடுத்த பகுதி வாசிக்கப்படுகிறது...', style: TextStyle(color: Colors.white70)),
                 ],
               ),
             )
@@ -495,7 +497,7 @@ class _PrecisePerspectiveCropScreenState extends State<PrecisePerspectiveCropScr
                   top: renderRect.top,
                   width: renderRect.width,
                   height: renderRect.height,
-                  child: Image.file(File(widget.imagePath), fit: BoxFit.fill),
+                  child: Image.file(File(_normalizedPath!), fit: BoxFit.fill),
                 ),
                 Positioned.fill(
                   bottom: 70,
