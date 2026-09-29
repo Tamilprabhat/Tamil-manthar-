@@ -26,13 +26,20 @@ jobs:
       - name: Install Python Pillow
         run: python3 -m pip install --upgrade Pillow
 
-      - name: Recreate Android Structure & Inject Royal Gold Icon
+      - name: Download Tesseract Models (Tamil and English)
+        run: |
+          mkdir -p assets/tessdata
+          curl -L -o assets/tessdata/tam.traineddata https://github.com/tesseract-ocr/tessdata_fast/raw/main/tam.traineddata
+          curl -L -o assets/tessdata/eng.traineddata https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata
+
+      - name: Recreate Android Structure & Permanently Fix App Icon
         run: |
           flutter create --project-name tamil_manthar --platforms=android .
           mkdir -p android
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
           
+          # கேமரா & ஸ்டோரேஜ் அனுமதிகள்
           python3 -c "
           p = 'android/app/src/main/AndroidManifest.xml'
           with open(p, 'r') as f:
@@ -48,10 +55,19 @@ jobs:
               f.write(c)
           "
 
+          # பழைய flutter ஐகான் கோப்புகளை அகற்றி, புதிய ராயல் கோல்ட் ஐகானை அனைத்து அளவுகளிலும் நிறுவுதல்
           python3 -c "
-          import os
+          import os, shutil
           from PIL import Image
           
+          res_dir = 'android/app/src/main/res'
+          
+          # பழைய அடாப்டிவ் XML கோப்புறையை நீக்குதல் (இதுதான் பழைய லோகோவை காட்டியது)
+          anydpi_dir = os.path.join(res_dir, 'mipmap-anydpi-v26')
+          if os.path.exists(anydpi_dir):
+              shutil.rmtree(anydpi_dir)
+              print('Removed mipmap-anydpi-v26 XML defaults!')
+
           icon_path = 'assets/app_icon.png'
           if os.path.exists(icon_path):
               im = Image.open(icon_path).convert('RGBA')
@@ -62,15 +78,13 @@ jobs:
                   'mipmap-xxhdpi': (144, 144),
                   'mipmap-xxxhdpi': (192, 192)
               }
-              res_dir = 'android/app/src/main/res'
               for folder, size in sizes.items():
                   target_dir = os.path.join(res_dir, folder)
                   os.makedirs(target_dir, exist_ok=True)
                   out_im = im.resize(size, Image.Resampling.LANCZOS)
                   out_im.save(os.path.join(target_dir, 'ic_launcher.png'))
                   out_im.save(os.path.join(target_dir, 'ic_launcher_round.png'))
-                  out_im.save(os.path.join(target_dir, 'ic_launcher_foreground.png'))
-              print('Royal Gold icon successfully placed!')
+              print('Royal Gold icon forcefully injected into all mipmap directories!')
           "
 
       - name: Get Dependencies
