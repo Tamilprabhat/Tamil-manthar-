@@ -11,10 +11,7 @@ class OcrService {
       String processedPath = imagePath;
 
       if (originalImage != null) {
-        // பட சுழற்சியைச் சீரமைத்தல்
         originalImage = img.bakeOrientation(originalImage);
-
-        // மலர் பின்னணியை நீக்கி சிவப்பு எழுத்துக்களைத் தனியாகப் பிரிக்கும் கிரீன் சேனல் முறை
         var gray = img.grayscale(originalImage);
         gray = img.adjustColor(gray, contrast: 1.35, brightness: 1.05);
 
@@ -48,11 +45,8 @@ class OcrService {
       String line = rawLine.trim();
       if (line.isEmpty) continue;
 
-      // உடைந்த ஆங்கில குப்பை எச்சங்களை நீக்குதல்
       if (RegExp(r'^(?:[க-ளa-zA-Z\:\.\s]){1,5}$').hasMatch(line) && !line.contains(RegExp(r'\d'))) continue;
-      if (line.contains('Pena RR') || line.contains('sila ii')) continue;
 
-      // எண் வரிசைகளைச் சீரமைத்தல்
       line = line.replaceAllMapped(
         RegExp(r'^[\[\(]\s*(\d+)\s*[\]\)]\s*[\.\-\:]?\s*'),
         (m) => '${m[1]}. ',
@@ -63,12 +57,17 @@ class OcrService {
         (m) => '${m[1]}. ${m[2]}',
       );
 
-      // பொதுவான பாடல் தலைப்புகள்
+      line = line.replaceAllMapped(
+        RegExp(r'^(I|II|III|IV|V|VI|VII|VIII|IX|X)\s*[\.\)]\s*', caseSensitive: false),
+        (m) => '${m[1]!.toUpperCase()}. ',
+      );
+
+      line = line.replaceAll(RegExp(r'(?<=[\u0B80-\u0BFF])\s+[a-zA-Z]{1,2}\s+(?=[\u0B80-\u0BFF])'), ' ');
+
       line = line.replaceAll(RegExp(r'சரணங்கள்|சரணஙகள்', caseSensitive: false), 'சரணங்கள்');
       line = line.replaceAll(RegExp(r'பல்லவி|பல்லவ|பலலவி', caseSensitive: false), 'பல்லவி');
       line = line.replaceAll(RegExp(r'அனுபல்லவி|அநுபல்லவி', caseSensitive: false), 'அனுபல்லவி');
 
-      // எழுத்துப் பிழை திருத்தங்கள்
       line = line.replaceAll('சயை', 'சபை');
       line = line.replaceAll('நடத்துதின்றது', 'நடத்துகின்றது');
       line = line.replaceAll('உள்கமே', 'உள்ளமே');
@@ -77,6 +76,10 @@ class OcrService {
       line = line.replaceAll('துதியிலும்', 'துதியினும்');
 
       formattedLines.add(line);
+    }
+
+    if (formattedLines.isNotEmpty && formattedLines.first.length <= 4 && !formattedLines.first.contains(RegExp(r'\d'))) {
+      formattedLines.removeAt(0);
     }
 
     return formattedLines.join('\n\n');

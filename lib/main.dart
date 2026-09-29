@@ -212,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               child: Column(
                 children: [
-                  const Text('திறன் பார்வை (Google ML Smart OCR)',
+                  const Text('திறன் பார்வை (Perspective Smart OCR)',
                       style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
                   const SizedBox(height: 6),
                   const Text('தேர்ந்தெடுத்த வரியை மட்டும் துல்லியமாக வெட்டி மாற்றலாம்',

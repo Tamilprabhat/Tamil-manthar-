@@ -26,20 +26,25 @@ jobs:
       - name: Install Python Pillow
         run: python3 -m pip install --upgrade Pillow
 
-      - name: Download Tesseract Models (Tamil and English)
+      - name: Verify Tesseract Models
         run: |
           mkdir -p assets/tessdata
-          curl -L -o assets/tessdata/tam.traineddata https://github.com/tesseract-ocr/tessdata_fast/raw/main/tam.traineddata
-          curl -L -o assets/tessdata/eng.traineddata https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata
+          if [ ! -s assets/tessdata/tam.traineddata ]; then
+            curl -L -o assets/tessdata/tam.traineddata https://github.com/tesseract-ocr/tessdata_fast/raw/main/tam.traineddata
+          fi
+          if [ ! -s assets/tessdata/eng.traineddata ]; then
+            curl -L -o assets/tessdata/eng.traineddata https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata
+          fi
+          ls -la assets/tessdata/
 
-      - name: Recreate Android Structure & Permanently Fix App Icon
+      - name: Recreate Android & Permanently Inject Royal Gold Icon
         run: |
           flutter create --project-name tamil_manthar --platforms=android .
           mkdir -p android
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
           
-          # கேமரா & ஸ்டோரேஜ் அனுமதிகள்
+          # கேமரா அனுமதிகளை Manifest-ல் சேர்த்தல்
           python3 -c "
           p = 'android/app/src/main/AndroidManifest.xml'
           with open(p, 'r') as f:
@@ -55,18 +60,18 @@ jobs:
               f.write(c)
           "
 
-          # பழைய flutter ஐகான் கோப்புகளை அகற்றி, புதிய ராயல் கோல்ட் ஐகானை அனைத்து அளவுகளிலும் நிறுவுதல்
+          # பழைய flutter பறவை லோகோ அடாப்டிவ் XML-ஐ நீக்குதல் மற்றும் புதிய ராயல் லோகோவை அமைத்தல்
           python3 -c "
           import os, shutil
           from PIL import Image
           
           res_dir = 'android/app/src/main/res'
           
-          # பழைய அடாப்டிவ் XML கோப்புறையை நீக்குதல் (இதுதான் பழைய லோகோவை காட்டியது)
+          # பழைய அடாப்டிவ் கோப்புறையை அழித்தல்
           anydpi_dir = os.path.join(res_dir, 'mipmap-anydpi-v26')
           if os.path.exists(anydpi_dir):
               shutil.rmtree(anydpi_dir)
-              print('Removed mipmap-anydpi-v26 XML defaults!')
+              print('Removed anydpi XML successfully!')
 
           icon_path = 'assets/app_icon.png'
           if os.path.exists(icon_path):
@@ -84,7 +89,8 @@ jobs:
                   out_im = im.resize(size, Image.Resampling.LANCZOS)
                   out_im.save(os.path.join(target_dir, 'ic_launcher.png'))
                   out_im.save(os.path.join(target_dir, 'ic_launcher_round.png'))
-              print('Royal Gold icon forcefully injected into all mipmap directories!')
+                  out_im.save(os.path.join(target_dir, 'ic_launcher_foreground.png'))
+              print('Royal Gold icon written to all mipmaps!')
           "
 
       - name: Get Dependencies
