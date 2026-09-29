@@ -30,7 +30,6 @@ jobs:
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
           
-          # கேமரா & மீடியா அனுமதிகளை AndroidManifest.xml-ல் பதிவு செய்தல்
           python3 -c "
           p = 'android/app/src/main/AndroidManifest.xml'
           with open(p, 'r') as f:
@@ -48,6 +47,12 @@ jobs:
 
       - name: Get Dependencies
         run: flutter pub get
+
+      - name: Generate App Launcher Icons
+        run: |
+          if [ -f "assets/app_icon.png" ]; then
+            dart run flutter_launcher_icons
+          fi
 
       - name: Build APK
         run: flutter build apk --release

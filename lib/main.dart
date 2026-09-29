@@ -52,9 +52,37 @@ class PrefsStorage {
     }
   }
 
+  // ஒரே பெயரில் உள்ள தலைப்புகளைக் கண்டறிந்து (1), (2) என மாற்றும் முறை
+  static String generateUniqueTitle(List<SavedDoc> existingDocs, String baseTitle, {String? excludeId}) {
+    String cleanBase = baseTitle.replaceAll(RegExp(r'\s*\(\d+\)$'), '').trim();
+    if (cleanBase.isEmpty) cleanBase = 'ஆவணம்';
+
+    List<String> currentTitles = existingDocs
+        .where((d) => excludeId == null || d.id != excludeId)
+        .map((d) => d.title.trim())
+        .toList();
+
+    if (!currentTitles.contains(cleanBase)) {
+      return cleanBase;
+    }
+
+    int counter = 1;
+    while (true) {
+      String candidate = '$cleanBase ($counter)';
+      if (!currentTitles.contains(candidate)) {
+        return candidate;
+      }
+      counter++;
+    }
+  }
+
   static Future<void> saveDoc(SavedDoc newDoc) async {
     final prefs = await SharedPreferences.getInstance();
     List<SavedDoc> list = await getDocs();
+    
+    // தலைப்பை சரிபார்த்து அடைப்புக்குறிக்குள் எண் சேர்த்தல்
+    newDoc.title = generateUniqueTitle(list, newDoc.title, excludeId: newDoc.id);
+
     int idx = list.indexWhere((d) => d.id == newDoc.id);
     if (idx >= 0) {
       list[idx] = newDoc;
@@ -135,10 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } else {
       if (Platform.isAndroid) {
-        var status = await Permission.photos.request();
-        if (status.isPermanentlyDenied || (!status.isGranted && !await Permission.storage.request().isGranted)) {
-          // பல புதிய ஆண்ட்ராய்டுகளில் போட்டோ பிக்கர் தானாக அனுமதிக்கப்படும்
-        }
+        await Permission.photos.request();
       }
     }
     return true;
@@ -312,7 +337,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// 4 மூலைகளிலும் 360° சாய்வு கோணத்தில் நகர்த்தக்கூடிய இலவச கிராப் திரை
 class FreeQuadCropScreen extends StatefulWidget {
   final String imagePath;
   const FreeQuadCropScreen({super.key, required this.imagePath});
@@ -322,13 +346,13 @@ class FreeQuadCropScreen extends StatefulWidget {
 }
 
 class _FreeQuadCropScreenState extends State<FreeQuadCropScreen> {
-  final OcrService _ocrService = _OcrWrapper();
+  final OcrService _ocrService = OcrService();
   bool _isProcessing = false;
 
-  late Offset p1; // Top-Left
-  late Offset p2; // Top-Right
-  late Offset p3; // Bottom-Right
-  late Offset p4; // Bottom-Left
+  late Offset p1;
+  late Offset p2;
+  late Offset p3;
+  late Offset p4;
   bool _initialized = false;
 
   void _initPoints(Size size) {
@@ -386,6 +410,7 @@ class _FreeQuadCropScreenState extends State<FreeQuadCropScreen> {
         date: DateTime.now(),
       );
 
+      // பெயரிடலில் தானாகவே (1), (2) என சேர்க்கப்படும்
       await PrefsStorage.saveDoc(newDoc);
 
       if (!mounted) return;
@@ -531,7 +556,6 @@ class QuadPolygonPainter extends CustomPainter {
   bool shouldRepaint(covariant QuadPolygonPainter oldDelegate) => true;
 }
 
-// நிஜமான A4 தாள் போன்ற எடிட்டர்
 class A4DocumentScreen extends StatefulWidget {
   final SavedDoc doc;
   const A4DocumentScreen({super.key, required this.doc});
@@ -670,6 +694,3 @@ class _A4DocumentScreenState extends State<A4DocumentScreen> {
     );
   }
 }
-
-// பழைய OcrService இன்ஸ்டன்ஸைப் பாதுகாப்பாகப் பயன்படுத்தும் ரேப்பர்
-class _OcrWrapper extends OcrService {}

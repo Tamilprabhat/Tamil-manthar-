@@ -17,6 +17,7 @@ dependencies:
   flutter_tesseract_ocr: ^0.4.31
 
 dev_dependencies:
+  flutter_launcher_icons: ^0.13.1
   permission_handler: ^11.3.1
   shared_preferences: ^2.2.2
   path_provider: ^2.1.2
