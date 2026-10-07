@@ -1,10 +1,9 @@
 import 'dart:io';
-import 'dart:convert';
 import 'package:flutter_tesseract_ocr/flutter_tesseract_ocr.dart';
 import 'package:image/image.dart' as img;
 
 class OcrService {
-  Future<String> extractText(String imagePath, {bool tryOnline = true}) async {
+  Future<String> extractText(String imagePath) async {
     try {
       final imageBytes = await File(imagePath).readAsBytes();
       var originalImage = img.decodeImage(imageBytes);
@@ -20,17 +19,6 @@ class OcrService {
         processedPath = tempFile.path;
       }
 
-      // 1. ஆன்லைனில் இருந்தால் இலவச அதிதுல்லிய OCR முறை
-      if (tryOnline) {
-        try {
-          String? onlineResult = await _fetchOnlineOcr(processedPath);
-          if (onlineResult != null && onlineResult.trim().isNotEmpty) {
-            return _processBilingualAndNumerals(onlineResult);
-          }
-        } catch (_) {}
-      }
-
-      // 2. ஆஃப்லைன் எஞ்சின்
       String rawText = await FlutterTesseractOcr.extractText(
         processedPath,
         language: 'tam+eng',
@@ -46,32 +34,6 @@ class OcrService {
     }
   }
 
-  Future<String?> _fetchOnlineOcr(String imagePath) async {
-    try {
-      final bytes = await File(imagePath).readAsBytes();
-      final base64Image = base64Encode(bytes);
-
-      var uri = Uri.parse('https://api.ocr.space/parse/image');
-      var request = HttpClient();
-      var req = await request.postUrl(uri);
-      
-      String body = 'language=tam&isOverlayRequired=false&base64Image=data:image/png;base64,$base64Image';
-      req.headers.set('apikey', 'K88998242488957');
-      req.headers.set('Content-Type', 'application/x-www-form-urlencoded');
-      req.write(body);
-
-      var response = await req.close();
-      if (response.statusCode == 200) {
-        var respBody = await response.transform(utf8.decoder).join();
-        var json = jsonDecode(respBody);
-        if (json['ParsedResults'] != null && json['ParsedResults'].isNotEmpty) {
-          return json['ParsedResults'][0]['ParsedText'];
-        }
-      }
-    } catch (_) {}
-    return null;
-  }
-
   String _processBilingualAndNumerals(String text) {
     if (text.trim().isEmpty) return "";
 
@@ -82,11 +44,14 @@ class OcrService {
       String line = rawLine.trim();
       if (line.isEmpty) continue;
 
-      // 'கு. so அங்கை' போன்ற விளிம்பு உடைந்த குப்பைகளை நீக்குதல்
-      if (line.contains('so அங்கை') || line.contains('so அங்') || RegExp(r'^[^\w\s\u0B80-\u0BFF]{1,4}$').hasMatch(line)) continue;
-      if (line.contains('Pena RR') || line.contains('sila ii')) continue;
+      // 1. விளிம்புகளில் விழும் உடைந்த ஆங்கில/குறியீட்டு எச்சங்களை முழுமையாக நீக்குதல்
+      if (line.toLowerCase().contains('nae an') || line.toLowerCase().contains('praise') || line.toLowerCase().contains('lord')) continue;
+      if (line.contains('so அங்கை') || line.contains('so அங்') || line.contains('அபைகான்')) continue;
+      if (line.startsWith('க்யா') || line.startsWith('ங...')) continue;
+      if (RegExp(r'^[a-zA-Z\s\.\:\,\-]{1,8}$').hasMatch(line)) continue;
+      if (RegExp(r'^[^\w\s\u0B80-\u0BFF]{1,5}$').hasMatch(line)) continue;
 
-      // அடைப்புக்குறி எண்கள் சீரமைப்பு: (1) அல்லது [ 3 ] -> 3.
+      // 2. அடைப்புக்குறி எண்களைச் சீரமைத்தல்: (1) அல்லது [ 1 ] -> 1.
       line = line.replaceAllMapped(
         RegExp(r'^[\[\(]\s*(\d+)\s*[\]\)]\s*[\.\-\:]?\s*'),
         (m) => '${m[1]}. ',
@@ -97,7 +62,7 @@ class OcrService {
         (m) => '${m[1]}. ${m[2]}',
       );
 
-      // பாடல் அச்சுப் பிழைகளைத் துல்லியமாக மாற்றுதல்
+      // 3. பாடல் சொற்களின் துல்லியத் திருத்தங்கள்
       line = line.replaceAll(RegExp(r'துகி\b'), 'துதி');
       line = line.replaceAll(RegExp(r'நிலுக்கினீரே|நிறுக்கினீரே'), 'நிறுத்தினீரே');
       line = line.replaceAll(RegExp(r'து[£¢\?]?தரிலும்|து£தரிலும்|து£தரி'), 'துதியிலும்');
@@ -114,8 +79,11 @@ class OcrService {
       formattedLines.add(line);
     }
 
-    // முதல் வரி அல்லது கடைசி வரியில் தேவையற்ற 1-2 எழுத்து சில்லறைகளை நீக்குதல்
-    if (formattedLines.isNotEmpty && formattedLines.last.length <= 6 && !formattedLines.last.contains(RegExp(r'\d'))) {
+    // முதல் வரி அல்லது கடைசி வரியில் உள்ள துண்டு எச்சங்களை அகற்றுதல்
+    if (formattedLines.isNotEmpty && formattedLines.first.length <= 6 && !formattedLines.first.contains(RegExp(r'[\u0B80-\u0BFF]'))) {
+      formattedLines.removeAt(0);
+    }
+    if (formattedLines.isNotEmpty && formattedLines.last.length <= 8 && !formattedLines.last.contains(RegExp(r'\d'))) {
       formattedLines.removeLast();
     }
 

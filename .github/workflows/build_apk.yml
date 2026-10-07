@@ -43,6 +43,7 @@ jobs:
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
           
+          # Manifest-ல் நேரடி தமிழ் லேபிள் 'தமிழ் மாந்தர்' அமைத்தல்
           python3 -c "
           p = 'android/app/src/main/AndroidManifest.xml'
           with open(p, 'r') as f:
@@ -56,21 +57,30 @@ jobs:
           if 'android.permission.CAMERA' not in c:
               c = c.replace('<application', perms + '\n    <application')
           
-          c = c.replace('android:label=\"tamil_manthar\"', 'android:label=\"Tamil Manthar\"')
-          c = c.replace('android:icon=\"@mipmap/ic_launcher\"', 'android:icon=\"@mipmap/app_gold_icon\"')
+          # லேபிளை தமிழ் மாந்தர் என மாற்றுதல்
+          import re
+          c = re.sub(r'android:label=\"[^\"]*\"', 'android:label=\"தமிழ் மாந்தர்\"', c)
+          c = c.replace('android:icon=\"@mipmap/ic_launcher\"', 'android:icon=\"@mipmap/ic_launcher\"')
           
           with open(p, 'w') as f:
               f.write(c)
           "
 
+          # அனைத்து mipmap கோப்புறைகளிலும் அடாப்டிவ் முரண்பாடின்றி அசல் லோகோவை பதித்தல்
           python3 -c "
           import os, shutil
           from PIL import Image
           
           res_dir = 'android/app/src/main/res'
-          anydpi_dir = os.path.join(res_dir, 'mipmap-anydpi-v26')
-          if os.path.exists(anydpi_dir):
-              shutil.rmtree(anydpi_dir)
+          
+          # அடாப்டிவ் xml கோப்புறைகளை முழுமையாக அழித்தல்
+          for fld in ['mipmap-anydpi-v26', 'drawable-v21', 'drawable']:
+              p = os.path.join(res_dir, fld)
+              if os.path.exists(p):
+                  for item in os.listdir(p):
+                      if 'ic_launcher' in item:
+                          try: os.remove(os.path.join(p, item))
+                          except: pass
 
           icon_path = 'assets/app_icon.png'
           if os.path.exists(icon_path):
@@ -88,7 +98,8 @@ jobs:
                   out_im = im.resize(size, Image.Resampling.LANCZOS)
                   out_im.save(os.path.join(target_dir, 'ic_launcher.png'))
                   out_im.save(os.path.join(target_dir, 'ic_launcher_round.png'))
-                  out_im.save(os.path.join(target_dir, 'app_gold_icon.png'))
+                  out_im.save(os.path.join(target_dir, 'ic_launcher_foreground.png'))
+              print('Royal Gold icon written to all mipmaps successfully!')
           "
 
       - name: Get Dependencies
