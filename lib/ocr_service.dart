@@ -1,20 +1,17 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter_tesseract_ocr/flutter_tesseract_ocr.dart';
 import 'package:image/image.dart' as img;
 
 class OcrService {
-  Future<String> extractText(String imagePath) async {
+  Future<String> extractText(String imagePath, {bool tryOnline = true}) async {
     try {
       final imageBytes = await File(imagePath).readAsBytes();
       var originalImage = img.decodeImage(imageBytes);
 
       String processedPath = imagePath;
-
       if (originalImage != null) {
-        // படச் சுழற்சியைச் சீரமைத்தல்
         originalImage = img.bakeOrientation(originalImage);
-
-        // உகந்த கான்ட்ராஸ்ட் மூலம் புள்ளிகளையும் மங்கலான எழுத்துக்களையும் தெளிவுபடுத்துதல்
         var gray = img.grayscale(originalImage);
         gray = img.adjustColor(gray, contrast: 1.4, brightness: 1.02);
 
@@ -23,6 +20,17 @@ class OcrService {
         processedPath = tempFile.path;
       }
 
+      // 1. ஆன்லைனில் இருந்தால் இலவச அதிதுல்லிய OCR முறை
+      if (tryOnline) {
+        try {
+          String? onlineResult = await _fetchOnlineOcr(processedPath);
+          if (onlineResult != null && onlineResult.trim().isNotEmpty) {
+            return _processBilingualAndNumerals(onlineResult);
+          }
+        } catch (_) {}
+      }
+
+      // 2. ஆஃப்லைன் எஞ்சின்
       String rawText = await FlutterTesseractOcr.extractText(
         processedPath,
         language: 'tam+eng',
@@ -38,6 +46,32 @@ class OcrService {
     }
   }
 
+  Future<String?> _fetchOnlineOcr(String imagePath) async {
+    try {
+      final bytes = await File(imagePath).readAsBytes();
+      final base64Image = base64Encode(bytes);
+
+      var uri = Uri.parse('https://api.ocr.space/parse/image');
+      var request = HttpClient();
+      var req = await request.postUrl(uri);
+      
+      String body = 'language=tam&isOverlayRequired=false&base64Image=data:image/png;base64,$base64Image';
+      req.headers.set('apikey', 'K88998242488957');
+      req.headers.set('Content-Type', 'application/x-www-form-urlencoded');
+      req.write(body);
+
+      var response = await req.close();
+      if (response.statusCode == 200) {
+        var respBody = await response.transform(utf8.decoder).join();
+        var json = jsonDecode(respBody);
+        if (json['ParsedResults'] != null && json['ParsedResults'].isNotEmpty) {
+          return json['ParsedResults'][0]['ParsedText'];
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   String _processBilingualAndNumerals(String text) {
     if (text.trim().isEmpty) return "";
 
@@ -48,10 +82,11 @@ class OcrService {
       String line = rawLine.trim();
       if (line.isEmpty) continue;
 
-      // அர்த்தமற்ற துண்டு எழுத்துக்களை நீக்குதல்
-      if (RegExp(r'^(?:[க-ளa-zA-Z\:\.\s]){1,4}$').hasMatch(line) && !line.contains(RegExp(r'\d'))) continue;
+      // 'கு. so அங்கை' போன்ற விளிம்பு உடைந்த குப்பைகளை நீக்குதல்
+      if (line.contains('so அங்கை') || line.contains('so அங்') || RegExp(r'^[^\w\s\u0B80-\u0BFF]{1,4}$').hasMatch(line)) continue;
+      if (line.contains('Pena RR') || line.contains('sila ii')) continue;
 
-      // அடைப்புக்குறி எண்கள் சீரமைப்பு: [ 3 ] அல்லது (3) -> 3.
+      // அடைப்புக்குறி எண்கள் சீரமைப்பு: (1) அல்லது [ 3 ] -> 3.
       line = line.replaceAllMapped(
         RegExp(r'^[\[\(]\s*(\d+)\s*[\]\)]\s*[\.\-\:]?\s*'),
         (m) => '${m[1]}. ',
@@ -62,10 +97,10 @@ class OcrService {
         (m) => '${m[1]}. ${m[2]}',
       );
 
-      // பொதுவான பாடல் பிழைகளைத் துல்லியமாக மாற்றுதல்
+      // பாடல் அச்சுப் பிழைகளைத் துல்லியமாக மாற்றுதல்
       line = line.replaceAll(RegExp(r'துகி\b'), 'துதி');
       line = line.replaceAll(RegExp(r'நிலுக்கினீரே|நிறுக்கினீரே'), 'நிறுத்தினீரே');
-      line = line.replaceAll(RegExp(r'து[£¢\?]?தரிலும்|து£தரிலும்'), 'துதியிலும்');
+      line = line.replaceAll(RegExp(r'து[£¢\?]?தரிலும்|து£தரிலும்|து£தரி'), 'துதியிலும்');
       line = line.replaceAll(RegExp(r'கன்மலைமேல்|கள்மலைமேல்'), 'கன்மலைமேல்');
       line = line.replaceAll(RegExp(r'முஷிகூட்டினீர்|முடிகூட்டினீர்'), 'முடிசூட்டினீர்');
       line = line.replaceAll(RegExp(r'உள்கமே|உளளமே'), 'உள்ளமே');
@@ -74,15 +109,14 @@ class OcrService {
       line = line.replaceAll(RegExp(r'சரணங்கள்|சரணஙகள்', caseSensitive: false), 'சரணங்கள்');
       line = line.replaceAll(RegExp(r'பல்லவி|பல்லவ|பலலவி', caseSensitive: false), 'பல்லவி');
       line = line.replaceAll(RegExp(r'அனுபல்லவி|அநுபல்லவி', caseSensitive: false), 'அனுபல்லவி');
-
-      // தனித்து நிற்கும் தவறான குறியீடுகளை நீக்குதல்
       line = line.replaceAll('£', '');
 
       formattedLines.add(line);
     }
 
-    if (formattedLines.isNotEmpty && formattedLines.first.length <= 4 && !formattedLines.first.contains(RegExp(r'\d'))) {
-      formattedLines.removeAt(0);
+    // முதல் வரி அல்லது கடைசி வரியில் தேவையற்ற 1-2 எழுத்து சில்லறைகளை நீக்குதல்
+    if (formattedLines.isNotEmpty && formattedLines.last.length <= 6 && !formattedLines.last.contains(RegExp(r'\d'))) {
+      formattedLines.removeLast();
     }
 
     return formattedLines.join('\n\n');
